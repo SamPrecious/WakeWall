@@ -1,0 +1,5 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="app_name">WakeWall</string>
+    <string name="wallpaper_description">A fresh wallpaper whenever your phone wakes.</string>
+</resources>
