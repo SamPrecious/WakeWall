@@ -18,6 +18,11 @@ class MainActivity : FlutterFragmentActivity() {
     ) { uris ->
         handlePickedImages(uris)
     }
+    private val documentImagePicker = registerForActivityResult(
+        ActivityResultContracts.OpenMultipleDocuments(),
+    ) { uris ->
+        handlePickedImages(uris)
+    }
 
     // Connects Flutter's controls to the Android wallpaper service.
     override fun configureFlutterEngine(flutterEngine: FlutterEngine) {
@@ -26,6 +31,7 @@ class MainActivity : FlutterFragmentActivity() {
             .setMethodCallHandler { call, result ->
                 when (call.method) {
                     "pickImages" -> pickImages(result)
+                    "pickImagesFromFiles" -> pickImagesFromFiles(result)
                     "importNormalizedImages" -> {
                         val images = call.argument<List<Map<String, Any>>>("images").orEmpty()
                             .mapNotNull { image ->
@@ -96,6 +102,13 @@ class MainActivity : FlutterFragmentActivity() {
                         result.success(null)
                     }
 
+                    "updatePhotoSource" -> {
+                        WakeWallStore(this).updatePhotoSource(
+                            call.argument<String>("source") ?: "askEveryTime",
+                        )
+                        result.success(null)
+                    }
+
                     "updateCrop" -> {
                         val index = call.argument<Int>("index") ?: 0
                         WakeWallStore(this).setCrop(
@@ -154,6 +167,16 @@ class MainActivity : FlutterFragmentActivity() {
         }
         pendingImageResult = result
         imagePicker.launch(PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.ImageOnly))
+    }
+
+    // Opens Android's document providers for Gallery, Downloads, and file apps.
+    private fun pickImagesFromFiles(result: MethodChannel.Result) {
+        if (pendingImageResult != null) {
+            result.error("picker_open", "The image picker is already open.", null)
+            return
+        }
+        pendingImageResult = result
+        documentImagePicker.launch(arrayOf("image/*"))
     }
 
     private fun notifyWallpaperService() {

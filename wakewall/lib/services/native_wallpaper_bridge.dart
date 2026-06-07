@@ -22,6 +22,13 @@ class NativeWallpaperBridge {
     return result ?? const {};
   }
 
+  Future<Map<String, Object?>> pickImagesFromFiles() async {
+    final result = await _channel.invokeMapMethod<String, Object?>(
+      'pickImagesFromFiles',
+    );
+    return result ?? const {};
+  }
+
   Future<Map<String, Object?>> importNormalizedImages(
     List<Map<String, Object?>> images,
   ) async {
@@ -71,6 +78,10 @@ class NativeWallpaperBridge {
       'offsetX': offsetX,
       'offsetY': offsetY,
     });
+  }
+
+  Future<void> updatePhotoSource(String source) async {
+    await _channel.invokeMethod<void>('updatePhotoSource', {'source': source});
   }
 
   Future<Map<String, Object?>> configuration() async {

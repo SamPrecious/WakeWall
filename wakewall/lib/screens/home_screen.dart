@@ -123,7 +123,24 @@ class _HomeScreenState extends State<HomeScreen> {
   }
 
   Future<void> _addImages() async {
-    await controller.addImages();
+    var source = controller.photoSource;
+    if (source == PhotoSource.askEveryTime) {
+      final choice = await showModalBottomSheet<_AddSourceChoice>(
+        context: context,
+        isScrollControlled: true,
+        useSafeArea: true,
+        builder: (_) => const _AddSourceSheet(),
+      );
+      if (choice == null || !mounted) return;
+      source = choice.source;
+      if (choice.remember) await controller.setPhotoSource(source);
+    }
+
+    if (source == PhotoSource.files) {
+      await controller.addImagesFromFiles();
+    } else {
+      await controller.addImages();
+    }
     if (!mounted || controller.lastNativeError == null) return;
     ScaffoldMessenger.of(context)
       ..hideCurrentSnackBar()
@@ -617,6 +634,15 @@ class _SettingsSheet extends StatelessWidget {
                 ),
               ),
               const SizedBox(height: 10),
+              _SegmentedSetting(
+                label: 'Photo source',
+                icon: Icons.add_photo_alternate_outlined,
+                options: const ['Ask', 'Photos', 'Files'],
+                selectedIndex: controller.photoSource.index,
+                onSelected: (index) =>
+                    controller.setPhotoSource(PhotoSource.values[index]),
+              ),
+              const SizedBox(height: 10),
               _SwitchTile(
                 label: 'Pause WakeWall',
                 description: 'Keep the current wallpaper in place',
@@ -661,6 +687,147 @@ class _SettingsSheet extends StatelessWidget {
             child: const Text('Done'),
           ),
         ],
+      ),
+    );
+  }
+}
+
+class _AddSourceChoice {
+  const _AddSourceChoice(this.source, this.remember);
+
+  final PhotoSource source;
+  final bool remember;
+}
+
+class _AddSourceSheet extends StatefulWidget {
+  const _AddSourceSheet();
+
+  @override
+  State<_AddSourceSheet> createState() => _AddSourceSheetState();
+}
+
+class _AddSourceSheetState extends State<_AddSourceSheet> {
+  bool remember = false;
+
+  @override
+  Widget build(BuildContext context) {
+    return SingleChildScrollView(
+      padding: const EdgeInsets.fromLTRB(20, 6, 20, 24),
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Text('Add wallpapers', style: Theme.of(context).textTheme.titleLarge),
+          const SizedBox(height: 4),
+          Text(
+            'Choose where WakeWall should look.',
+            style: Theme.of(
+              context,
+            ).textTheme.bodyMedium?.copyWith(color: WakeWallColors.muted),
+          ),
+          const SizedBox(height: 18),
+          _SourceOption(
+            icon: Icons.photo_library_outlined,
+            title: 'Photos',
+            description: 'Use Android’s polished photo picker',
+            badge: 'Recommended',
+            onTap: () => _select(PhotoSource.photos),
+          ),
+          const SizedBox(height: 10),
+          _SourceOption(
+            icon: Icons.folder_outlined,
+            title: 'Files & other apps',
+            description: 'Browse Gallery, Downloads, and file providers',
+            onTap: () => _select(PhotoSource.files),
+          ),
+          const SizedBox(height: 14),
+          SwitchListTile(
+            contentPadding: EdgeInsets.zero,
+            title: const Text('Always use my choice'),
+            subtitle: const Text('You can change this later in Settings'),
+            value: remember,
+            onChanged: (value) => setState(() => remember = value),
+          ),
+        ],
+      ),
+    );
+  }
+
+  void _select(PhotoSource source) {
+    Navigator.pop(context, _AddSourceChoice(source, remember));
+  }
+}
+
+class _SourceOption extends StatelessWidget {
+  const _SourceOption({
+    required this.icon,
+    required this.title,
+    required this.description,
+    required this.onTap,
+    this.badge,
+  });
+
+  final IconData icon;
+  final String title;
+  final String description;
+  final String? badge;
+  final VoidCallback onTap;
+
+  @override
+  Widget build(BuildContext context) {
+    return Material(
+      color: WakeWallColors.background,
+      borderRadius: BorderRadius.circular(14),
+      child: InkWell(
+        onTap: onTap,
+        borderRadius: BorderRadius.circular(14),
+        child: Padding(
+          padding: const EdgeInsets.all(15),
+          child: Row(
+            children: [
+              Container(
+                width: 44,
+                height: 44,
+                decoration: BoxDecoration(
+                  color: WakeWallColors.raisedSurface,
+                  borderRadius: BorderRadius.circular(12),
+                ),
+                child: Icon(icon, color: WakeWallColors.tealStrong),
+              ),
+              const SizedBox(width: 14),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Row(
+                      children: [
+                        Text(
+                          title,
+                          style: Theme.of(context).textTheme.labelLarge,
+                        ),
+                        if (badge != null) ...[
+                          const SizedBox(width: 8),
+                          _StatusPill(label: badge!, icon: Icons.check_rounded),
+                        ],
+                      ],
+                    ),
+                    const SizedBox(height: 3),
+                    Text(
+                      description,
+                      style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                        color: WakeWallColors.muted,
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+              const Icon(
+                Icons.chevron_right_rounded,
+                color: WakeWallColors.muted,
+              ),
+            ],
+          ),
+        ),
       ),
     );
   }

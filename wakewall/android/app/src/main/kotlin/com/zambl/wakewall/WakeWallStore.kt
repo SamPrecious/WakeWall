@@ -42,6 +42,10 @@ class WakeWallStore(context: Context) {
         get() = prefs.getString("fit", "cropToFill") ?: "cropToFill"
         set(value) = prefs.edit().putString("fit", value).apply()
 
+    var photoSource: String
+        get() = prefs.getString("photo_source", "askEveryTime") ?: "askEveryTime"
+        set(value) = prefs.edit().putString("photo_source", value).apply()
+
     val wallpapers: List<String>
         get() {
             val saved = prefs.getString("wallpapers", null)
@@ -64,6 +68,10 @@ class WakeWallStore(context: Context) {
             .putBoolean("shuffle", shuffle)
             .putString("fit", fit)
             .apply()
+    }
+
+    fun updatePhotoSource(source: String) {
+        photoSource = source
     }
 
     fun addImages(uris: List<Uri>): ImportSummary {
@@ -222,6 +230,7 @@ class WakeWallStore(context: Context) {
             "paused" to paused,
             "shuffle" to shuffle,
             "fit" to fit,
+            "photoSource" to photoSource,
             "wallpapers" to wallpapers.mapIndexed(::wallpaperMap),
         )
     }

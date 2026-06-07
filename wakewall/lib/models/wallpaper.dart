@@ -1,10 +1,12 @@
-import 'dart:typed_data';
+ADdedimport 'dart:typed_data';
 
 import 'package:flutter/material.dart';
 
 enum WallpaperFit { cropToFill, fitEntireImage }
 
 enum RotationOrder { sequential, shuffle }
+
+enum PhotoSource { askEveryTime, photos, files }
 
 class Wallpaper {
   const Wallpaper({

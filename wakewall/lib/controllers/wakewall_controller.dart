@@ -16,6 +16,7 @@ class WakeWallController extends ChangeNotifier {
   bool _paused = false;
   RotationOrder _order = RotationOrder.shuffle;
   WallpaperFit _fit = WallpaperFit.cropToFill;
+  PhotoSource _photoSource = PhotoSource.askEveryTime;
   String? _lastNativeError;
 
   List<Wallpaper> get wallpapers => List.unmodifiable(_wallpapers);
@@ -24,6 +25,7 @@ class WakeWallController extends ChangeNotifier {
   bool get paused => _paused;
   RotationOrder get order => _order;
   WallpaperFit get fit => _fit;
+  PhotoSource get photoSource => _photoSource;
   Uint8List? get selectedPreview => selectedWallpaper?.preview;
   String? get lastNativeError => _lastNativeError;
 
@@ -85,6 +87,16 @@ class WakeWallController extends ChangeNotifier {
 
   Future<void> addImages() async {
     await _importImages(_bridge.pickImages);
+  }
+
+  Future<void> addImagesFromFiles() async {
+    await _importImages(_bridge.pickImagesFromFiles);
+  }
+
+  Future<void> setPhotoSource(PhotoSource value) async {
+    _photoSource = value;
+    notifyListeners();
+    await _runNative(() => _bridge.updatePhotoSource(value.name));
   }
 
   Future<void> _importImages(
@@ -203,6 +215,10 @@ class WakeWallController extends ChangeNotifier {
     _fit = configuration['fit'] == WallpaperFit.fitEntireImage.name
         ? WallpaperFit.fitEntireImage
         : WallpaperFit.cropToFill;
+    _photoSource = PhotoSource.values.firstWhere(
+      (source) => source.name == configuration['photoSource'],
+      orElse: () => PhotoSource.askEveryTime,
+    );
 
     final savedWallpapers =
         configuration['wallpapers'] as List<Object?>? ?? const [];

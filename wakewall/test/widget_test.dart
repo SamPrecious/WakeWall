@@ -21,6 +21,21 @@ void main() {
     expect(find.text('Up Next'), findsNothing);
   });
 
+  testWidgets('Add wallpapers offers Photos and Files sources', (tester) async {
+    final controller = WakeWallController(bridge: _EmptyBridge());
+    await tester.pumpWidget(WakeWallApp(controller: controller));
+    await tester.pumpAndSettle();
+
+    await tester.tap(find.text('Add Wallpapers'));
+    await tester.pumpAndSettle();
+
+    expect(find.text('Add wallpapers'), findsOneWidget);
+    expect(find.text('Photos'), findsOneWidget);
+    expect(find.text('Files & other apps'), findsOneWidget);
+    expect(find.text('Always use my choice'), findsOneWidget);
+    expect(find.text('Recommended'), findsOneWidget);
+  });
+
   testWidgets('settings keeps the simple shuffle-first controls', (
     tester,
   ) async {
@@ -33,6 +48,9 @@ void main() {
 
     expect(find.text('Shuffle'), findsOneWidget);
     expect(find.text('Sequential'), findsOneWidget);
+    expect(find.text('Photo source'), findsOneWidget);
+    expect(find.text('Ask'), findsOneWidget);
+    expect(find.text('Files'), findsOneWidget);
     expect(find.text('Fit mode'), findsNothing);
     expect(find.text('Use WakeWall'), findsOneWidget);
   });

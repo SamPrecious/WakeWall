@@ -3,6 +3,7 @@ import 'dart:convert';
 
 import 'package:flutter_test/flutter_test.dart';
 import 'package:wakewall/controllers/wakewall_controller.dart';
+import 'package:wakewall/models/wallpaper.dart';
 import 'package:wakewall/services/native_wallpaper_bridge.dart';
 
 void main() {
@@ -31,6 +32,17 @@ void main() {
     await controller.next();
 
     expect(controller.selectedIndex, 3);
+  });
+
+  test('controller saves the preferred photo source', () async {
+    final bridge = _FakeNativeWallpaperBridge(currentIndex: 0);
+    final controller = WakeWallController(bridge: bridge);
+
+    await controller.initialize();
+    await controller.setPhotoSource(PhotoSource.files);
+
+    expect(controller.photoSource, PhotoSource.files);
+    expect(bridge.photoSource, 'files');
   });
 
   test('controller adds and removes user images through Android', () async {
@@ -106,6 +118,7 @@ class _FakeNativeWallpaperBridge extends NativeWallpaperBridge {
   final int? nextIndex;
   final Uint8List? failedImageBytes;
   final int failedWithoutBytes;
+  String photoSource = 'askEveryTime';
   final Uint8List previewBytes = Uint8List.fromList([1, 2, 3, 4]);
   late final List<Map<String, Object?>> wallpapers;
 
@@ -115,6 +128,7 @@ class _FakeNativeWallpaperBridge extends NativeWallpaperBridge {
     'paused': false,
     'shuffle': false,
     'fit': 'cropToFill',
+    'photoSource': photoSource,
     'wallpapers': wallpapers,
   };
 
@@ -173,5 +187,10 @@ class _FakeNativeWallpaperBridge extends NativeWallpaperBridge {
   Future<int?> showNext() async {
     currentIndex = nextIndex ?? currentIndex + 1;
     return currentIndex;
+  }
+
+  @override
+  Future<void> updatePhotoSource(String source) async {
+    photoSource = source;
   }
 }
