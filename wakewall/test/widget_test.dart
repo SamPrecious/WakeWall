@@ -1,4 +1,5 @@
 import 'dart:convert';
+import 'dart:async';
 
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
@@ -34,6 +35,43 @@ void main() {
     expect(find.text('Files & other apps'), findsOneWidget);
     expect(find.text('Always use my choice'), findsOneWidget);
     expect(find.text('Recommended'), findsOneWidget);
+  });
+
+  testWidgets('image import shows a blocking loading overlay', (tester) async {
+    final bridge = _DelayedImportBridge();
+    final controller = WakeWallController(bridge: bridge);
+    await tester.pumpWidget(WakeWallApp(controller: controller));
+    await tester.pumpAndSettle();
+
+    await tester.tap(find.text('Add Wallpapers'));
+    await tester.pump();
+
+    expect(find.byKey(const ValueKey('import-loading-overlay')), findsNothing);
+
+    await tester.pump(const Duration(milliseconds: 350));
+    expect(
+      find.byKey(const ValueKey('import-loading-overlay')),
+      findsOneWidget,
+    );
+    expect(find.text('Adding wallpapers'), findsOneWidget);
+    expect(find.byType(CircularProgressIndicator), findsOneWidget);
+
+    bridge.finishImport();
+    await tester.pumpAndSettle();
+    expect(find.byKey(const ValueKey('import-loading-overlay')), findsNothing);
+  });
+
+  testWidgets('quick image imports do not flash the loading overlay', (
+    tester,
+  ) async {
+    final controller = WakeWallController(bridge: _QuickImportBridge());
+    await tester.pumpWidget(WakeWallApp(controller: controller));
+    await tester.pumpAndSettle();
+
+    await tester.tap(find.text('Add Wallpapers'));
+    await tester.pumpAndSettle();
+
+    expect(find.byKey(const ValueKey('import-loading-overlay')), findsNothing);
   });
 
   testWidgets('settings keeps the simple shuffle-first controls', (
@@ -232,4 +270,40 @@ class _PopulatedBridge extends _EmptyBridge {
     wallpapers.insert(newIndex, wallpapers.removeAt(oldIndex));
     return configuration();
   }
+}
+
+class _DelayedImportBridge extends _EmptyBridge {
+  final Completer<Map<String, Object?>> importCompleter =
+      Completer<Map<String, Object?>>();
+
+  @override
+  Future<Map<String, Object?>> configuration() async => {
+    ...await super.configuration(),
+    'photoSource': 'photos',
+  };
+
+  @override
+  Future<Map<String, Object?>> pickImages() => importCompleter.future;
+
+  void finishImport() {
+    importCompleter.complete({
+      'index': 0,
+      'paused': false,
+      'shuffle': false,
+      'fit': 'cropToFill',
+      'photoSource': 'photos',
+      'wallpapers': const [],
+    });
+  }
+}
+
+class _QuickImportBridge extends _EmptyBridge {
+  @override
+  Future<Map<String, Object?>> configuration() async => {
+    ...await super.configuration(),
+    'photoSource': 'photos',
+  };
+
+  @override
+  Future<Map<String, Object?>> pickImages() => configuration();
 }

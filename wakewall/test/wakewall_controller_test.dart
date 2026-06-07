@@ -34,6 +34,19 @@ void main() {
     expect(controller.selectedIndex, 3);
   });
 
+  test('lightweight resume refresh keeps the loaded image previews', () async {
+    final bridge = _FakeNativeWallpaperBridge(currentIndex: 0);
+    final controller = WakeWallController(bridge: bridge);
+
+    await controller.initialize();
+    bridge.currentIndex = 2;
+    await controller.refreshState();
+
+    expect(controller.selectedIndex, 2);
+    expect(controller.wallpapers.length, 4);
+    expect(controller.selectedPreview, bridge.previewBytes);
+  });
+
   test('controller saves the preferred photo source', () async {
     final bridge = _FakeNativeWallpaperBridge(currentIndex: 0);
     final controller = WakeWallController(bridge: bridge);
@@ -63,6 +76,18 @@ void main() {
       ),
       isFalse,
     );
+  });
+
+  test('controller appends incremental native import results', () async {
+    final bridge = _IncrementalImportBridge(currentIndex: 0);
+    final controller = WakeWallController(bridge: bridge);
+
+    await controller.initialize();
+    final initialCount = controller.wallpapers.length;
+    await controller.addImages();
+
+    expect(controller.wallpapers.length, initialCount + 1);
+    expect(controller.wallpapers.last.name, 'Incremental photo.jpg');
   });
 
   test('controller automatically recovers a native import failure', () async {
@@ -133,6 +158,15 @@ class _FakeNativeWallpaperBridge extends NativeWallpaperBridge {
   };
 
   @override
+  Future<Map<String, Object?>> state() async => {
+    'index': currentIndex,
+    'paused': false,
+    'shuffle': false,
+    'fit': 'cropToFill',
+    'photoSource': photoSource,
+  };
+
+  @override
   Future<Map<String, Object?>> pickImages() async {
     if (failedImageBytes != null || failedWithoutBytes > 0) {
       return {
@@ -193,4 +227,24 @@ class _FakeNativeWallpaperBridge extends NativeWallpaperBridge {
   Future<void> updatePhotoSource(String source) async {
     photoSource = source;
   }
+}
+
+class _IncrementalImportBridge extends _FakeNativeWallpaperBridge {
+  _IncrementalImportBridge({required super.currentIndex});
+
+  @override
+  Future<Map<String, Object?>> pickImages() async => {
+    'index': currentIndex,
+    'paused': false,
+    'shuffle': false,
+    'fit': 'cropToFill',
+    'photoSource': photoSource,
+    'addedWallpapers': [
+      {
+        'uri': 'content://wakewall/incremental-photo',
+        'name': 'Incremental photo.jpg',
+        'crop': const {'scale': 1.0, 'offsetX': 0.0, 'offsetY': 0.0},
+      },
+    ],
+  };
 }

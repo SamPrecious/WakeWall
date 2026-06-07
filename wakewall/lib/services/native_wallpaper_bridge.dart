@@ -91,6 +91,12 @@ class NativeWallpaperBridge {
     return result ?? const {};
   }
 
+  Future<Map<String, Object?>> state() async {
+    return Map<String, Object?>.from(
+      await _channel.invokeMethod<Map<Object?, Object?>>('state') ?? const {},
+    );
+  }
+
   Future<Map<String, Object?>> diagnostics() async {
     final result = await _channel.invokeMapMethod<String, Object?>(
       'diagnostics',

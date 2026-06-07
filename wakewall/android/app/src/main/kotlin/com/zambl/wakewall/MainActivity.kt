@@ -9,6 +9,7 @@ import androidx.activity.result.contract.ActivityResultContracts
 import io.flutter.embedding.android.FlutterFragmentActivity
 import io.flutter.embedding.engine.FlutterEngine
 import io.flutter.plugin.common.MethodChannel
+import java.util.concurrent.Executors
 
 class MainActivity : FlutterFragmentActivity() {
     private val channelName = "com.zambl.wakewall/control"
@@ -39,15 +40,16 @@ class MainActivity : FlutterFragmentActivity() {
                                 val bytes = image["bytes"] as? ByteArray ?: return@mapNotNull null
                                 NormalizedImport(name, bytes)
                             }
-                        val store = WakeWallStore(this)
-                        val imported = store.addNormalizedImages(images)
-                        notifyWallpaperService()
-                        result.success(
-                            store.configuration().toMutableMap().apply {
-                                put("normalizedImportedCount", imported)
-                                put("normalizedFailedCount", images.size - imported)
+                        runInBackground(result) {
+                            val store = WakeWallStore(this)
+                            val imported = store.addNormalizedImages(images)
+                            notifyWallpaperService()
+                            store.state().toMutableMap().apply {
+                                put("addedWallpapers", store.wallpaperMaps(imported))
+                                put("normalizedImportedCount", imported.size)
+                                put("normalizedFailedCount", images.size - imported.size)
                             }
-                        )
+                        }
                     }
                     "openWallpaperPicker" -> {
                         openWallpaperPicker()
@@ -73,10 +75,13 @@ class MainActivity : FlutterFragmentActivity() {
                     }
 
                     "removeWallpaper" -> {
-                        val store = WakeWallStore(this)
-                        store.removeWallpaper(call.argument<Int>("index") ?: -1)
-                        notifyWallpaperService()
-                        result.success(store.configuration())
+                        val index = call.argument<Int>("index") ?: -1
+                        runInBackground(result) {
+                            val store = WakeWallStore(this)
+                            store.removeWallpaper(index)
+                            notifyWallpaperService()
+                            store.configuration()
+                        }
                     }
 
                     "moveWallpaper" -> {
@@ -121,7 +126,10 @@ class MainActivity : FlutterFragmentActivity() {
                         result.success(null)
                     }
 
-                    "configuration" -> result.success(WakeWallStore(this).configuration())
+                    "configuration" -> runInBackground(result) {
+                        WakeWallStore(this).configuration()
+                    }
+                    "state" -> result.success(WakeWallStore(this).state())
                     "diagnostics" -> result.success(WakeWallStore(this).diagnostics())
                     else -> result.notImplemented()
                 }
@@ -134,11 +142,15 @@ class MainActivity : FlutterFragmentActivity() {
                 contentResolver.takePersistableUriPermission(uri, Intent.FLAG_GRANT_READ_URI_PERMISSION)
             }
         }
-        val store = WakeWallStore(this)
-        val summary = store.addImages(uris)
-        notifyWallpaperService()
-        pendingImageResult?.success(
-            store.configuration().toMutableMap().apply {
+        val result = pendingImageResult
+        pendingImageResult = null
+        if (result == null) return
+        runInBackground(result) {
+            val store = WakeWallStore(this)
+            val summary = store.addImages(uris)
+            notifyWallpaperService()
+            store.state().toMutableMap().apply {
+                put("addedWallpapers", store.wallpaperMaps(summary.importedValues))
                 put("importedCount", summary.imported)
                 put("failedCount", summary.failed)
                 put(
@@ -156,8 +168,7 @@ class MainActivity : FlutterFragmentActivity() {
                     summary.failed - summary.failedImports.size,
                 )
             }
-        )
-        pendingImageResult = null
+        }
     }
 
     private fun pickImages(result: MethodChannel.Result) {
@@ -183,6 +194,20 @@ class MainActivity : FlutterFragmentActivity() {
         sendBroadcast(Intent(WakeWallService.ACTION_CONFIGURATION_UPDATED).setPackage(packageName))
     }
 
+    // Keeps image decoding and preview loading away from Android's screen thread.
+    private fun runInBackground(result: MethodChannel.Result, action: () -> Any?) {
+        backgroundExecutor.execute {
+            runCatching(action).fold(
+                onSuccess = { value -> runOnUiThread { result.success(value) } },
+                onFailure = { error ->
+                    runOnUiThread {
+                        result.error("native_error", error.message ?: "WakeWall could not finish the task.", null)
+                    }
+                },
+            )
+        }
+    }
+
     private fun openWallpaperPicker() {
         val component = ComponentName(this, WakeWallService::class.java)
         val directIntent = Intent(WallpaperManager.ACTION_CHANGE_LIVE_WALLPAPER).apply {
@@ -193,5 +218,9 @@ class MainActivity : FlutterFragmentActivity() {
         } catch (_: Exception) {
             startActivity(Intent(WallpaperManager.ACTION_LIVE_WALLPAPER_CHOOSER))
         }
+    }
+
+    companion object {
+        private val backgroundExecutor = Executors.newSingleThreadExecutor()
     }
 }

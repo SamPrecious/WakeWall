@@ -39,7 +39,7 @@ class _WakeWallAppState extends State<WakeWallApp> with WidgetsBindingObserver {
   @override
   // Refreshes the controls after returning from Android's wallpaper screens.
   void didChangeAppLifecycleState(AppLifecycleState state) {
-    if (state == AppLifecycleState.resumed) controller.initialize();
+    if (state == AppLifecycleState.resumed) controller.refreshState();
   }
 
   @override

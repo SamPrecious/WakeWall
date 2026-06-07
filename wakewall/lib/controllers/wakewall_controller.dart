@@ -18,6 +18,7 @@ class WakeWallController extends ChangeNotifier {
   WallpaperFit _fit = WallpaperFit.cropToFill;
   PhotoSource _photoSource = PhotoSource.askEveryTime;
   String? _lastNativeError;
+  Future<void>? _initialization;
 
   List<Wallpaper> get wallpapers => List.unmodifiable(_wallpapers);
   int get selectedIndex => _selectedIndex;
@@ -33,9 +34,27 @@ class WakeWallController extends ChangeNotifier {
       hasWallpapers ? _wallpapers[_selectedIndex] : null;
 
   // Restores the wallpaper service's saved choices when the app opens.
-  Future<void> initialize() async {
+  Future<void> initialize() {
+    return _initialization ??= _initialize().whenComplete(() {
+      _initialization = null;
+    });
+  }
+
+  Future<void> _initialize() async {
     try {
       _applyConfiguration(await _bridge.configuration());
+      notifyListeners();
+    } on MissingPluginException {
+      // Non-Android previews use the in-memory defaults.
+    } on PlatformException catch (error) {
+      _lastNativeError = error.message ?? error.code;
+    }
+  }
+
+  // Refreshes changing settings without reloading every image preview.
+  Future<void> refreshState() async {
+    try {
+      _applyConfiguration(await _bridge.state());
       notifyListeners();
     } on MissingPluginException {
       // Non-Android previews use the in-memory defaults.
@@ -104,7 +123,7 @@ class WakeWallController extends ChangeNotifier {
   ) async {
     await _runNative(() async {
       final configuration = await picker();
-      _applyConfiguration(configuration);
+      _applyImportResult(configuration);
       final failedImages =
           configuration['failedImages'] as List<Object?>? ?? const [];
       final failedWithoutBytes =
@@ -128,7 +147,7 @@ class WakeWallController extends ChangeNotifier {
             (recoveredConfiguration['normalizedImportedCount'] as num?)
                 ?.toInt() ??
             0;
-        _applyConfiguration(recoveredConfiguration);
+        _applyImportResult(recoveredConfiguration);
       }
       final failed = failedWithoutBytes + failedImages.length - storedRecovered;
       if (failed > 0) {
@@ -229,6 +248,15 @@ class WakeWallController extends ChangeNotifier {
     }
     final savedIndex = (configuration['index'] as num?)?.toInt() ?? 0;
     _selectedIndex = _wallpapers.isEmpty ? 0 : savedIndex % _wallpapers.length;
+  }
+
+  // Adds only the newly imported previews instead of rebuilding the full library.
+  void _applyImportResult(Map<String, Object?> configuration) {
+    _applyConfiguration(configuration);
+    if (configuration.containsKey('wallpapers')) return;
+    final added =
+        configuration['addedWallpapers'] as List<Object?>? ?? const [];
+    _wallpapers.addAll(added.map(_wallpaperFromNative));
   }
 
   Wallpaper _wallpaperFromNative(Object? value) {

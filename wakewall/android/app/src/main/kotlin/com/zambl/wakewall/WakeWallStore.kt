@@ -86,13 +86,13 @@ class WakeWallStore(context: Context) {
         }
         imported.forEach(updated::add)
         saveWallpapers(updated)
-        return ImportSummary(imported.size, uris.size - imported.size, failed)
+        return ImportSummary(imported, uris.size - imported.size, failed)
     }
 
     // Stores clean JPEGs created by Flutter's independent fallback decoder.
-    fun addNormalizedImages(images: List<NormalizedImport>): Int {
+    fun addNormalizedImages(images: List<NormalizedImport>): List<String> {
         val updated = wallpapers.toMutableList()
-        var imported = 0
+        val imported = mutableListOf<String>()
         images.forEach { image ->
             val id = "${UUID.randomUUID()}.jpg"
             val directory = File(appContext.filesDir, "wallpapers").apply { mkdirs() }
@@ -108,7 +108,7 @@ class WakeWallStore(context: Context) {
             val value = "$LOCAL_PREFIX$id"
             prefs.edit().putString("name_${value.hashCode()}", image.name).apply()
             updated.add(value)
-            imported++
+            imported.add(value)
         }
         saveWallpapers(updated)
         return imported
@@ -225,14 +225,28 @@ class WakeWallStore(context: Context) {
 
     fun configuration(): Map<String, Any> {
         migrateExternalImages()
+        return state() + mapOf(
+            "wallpapers" to wallpapers.mapIndexed(::wallpaperMap),
+        )
+    }
+
+    fun state(): Map<String, Any> {
         return mapOf(
             "index" to index,
             "paused" to paused,
             "shuffle" to shuffle,
             "fit" to fit,
             "photoSource" to photoSource,
-            "wallpapers" to wallpapers.mapIndexed(::wallpaperMap),
         )
+    }
+
+    // Builds preview data only for newly added wallpapers.
+    fun wallpaperMaps(values: List<String>): List<Map<String, Any>> {
+        val saved = wallpapers
+        return values.mapNotNull { value ->
+            val index = saved.indexOf(value)
+            if (index >= 0) wallpaperMap(index, value) else null
+        }
     }
 
     fun diagnostics(): Map<String, Any> = mapOf(
@@ -689,10 +703,12 @@ data class CropTransform(
 }
 
 data class ImportSummary(
-    val imported: Int,
+    val importedValues: List<String>,
     val failed: Int,
     val failedImports: List<FailedImport>,
-)
+) {
+    val imported: Int get() = importedValues.size
+}
 
 data class FailedImport(
     val name: String,

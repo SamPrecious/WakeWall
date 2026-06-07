@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:auto_route/auto_route.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
@@ -19,7 +21,10 @@ class HomeScreen extends StatefulWidget {
 }
 
 class _HomeScreenState extends State<HomeScreen> {
+  static const importOverlayDelay = Duration(milliseconds: 350);
+
   bool draggingWallpaper = false;
+  bool importingImages = false;
 
   WakeWallController get controller => widget.controller;
 
@@ -29,84 +34,91 @@ class _HomeScreenState extends State<HomeScreen> {
       listenable: controller,
       builder: (context, _) {
         return Scaffold(
-          body: SafeArea(
-            child: LayoutBuilder(
-              builder: (context, constraints) {
-                final compact = constraints.maxHeight < 720;
-                final horizontalPadding = constraints.maxWidth < 420
-                    ? 20.0
-                    : 28.0;
-                final headerHeight = compact ? 70.0 : 88.0;
-                final minimumCollectionHeight = controller.hasWallpapers
-                    ? (compact ? 94.0 : 116.0)
-                    : 0.0;
-                final reserved =
-                    headerHeight +
-                    minimumCollectionHeight +
-                    (compact ? 30 : 46);
-                final previewHeight = (constraints.maxHeight - reserved)
-                    .clamp(320.0, 680.0)
-                    .toDouble();
-                // Give portrait thumbnails any space left after preserving the preview.
-                final collectionHeight = controller.hasWallpapers
-                    ? (constraints.maxHeight -
-                              headerHeight -
-                              previewHeight -
-                              (compact ? 10 : 18))
-                          .clamp(
-                            minimumCollectionHeight,
-                            compact ? 126.0 : 156.0,
-                          )
-                          .toDouble()
-                    : 0.0;
+          body: Stack(
+            children: [
+              SafeArea(
+                child: LayoutBuilder(
+                  builder: (context, constraints) {
+                    final compact = constraints.maxHeight < 720;
+                    final horizontalPadding = constraints.maxWidth < 420
+                        ? 20.0
+                        : 28.0;
+                    final headerHeight = compact ? 70.0 : 88.0;
+                    final minimumCollectionHeight = controller.hasWallpapers
+                        ? (compact ? 94.0 : 116.0)
+                        : 0.0;
+                    final reserved =
+                        headerHeight +
+                        minimumCollectionHeight +
+                        (compact ? 30 : 46);
+                    final previewHeight = (constraints.maxHeight - reserved)
+                        .clamp(320.0, 680.0)
+                        .toDouble();
+                    // Give portrait thumbnails any space left after preserving the preview.
+                    final collectionHeight = controller.hasWallpapers
+                        ? (constraints.maxHeight -
+                                  headerHeight -
+                                  previewHeight -
+                                  (compact ? 10 : 18))
+                              .clamp(
+                                minimumCollectionHeight,
+                                compact ? 126.0 : 156.0,
+                              )
+                              .toDouble()
+                        : 0.0;
 
-                return Padding(
-                  padding: EdgeInsets.symmetric(horizontal: horizontalPadding),
-                  child: Column(
-                    children: [
-                      SizedBox(
-                        height: headerHeight,
-                        child: _Header(
-                          paused: controller.paused,
-                          onSettings: () => _showSettings(context),
-                        ),
+                    return Padding(
+                      padding: EdgeInsets.symmetric(
+                        horizontal: horizontalPadding,
                       ),
-                      Expanded(
-                        child: Align(
-                          alignment: Alignment.topCenter,
-                          child: _Preview(
-                            controller: controller,
-                            maximumHeight: previewHeight,
-                            draggingWallpaper: draggingWallpaper,
-                            onRemoveWallpaper: controller.removeAt,
-                            onAdd: _addImages,
-                            onCrop: () => context.router.push(
-                              CropEditorRoute(
+                      child: Column(
+                        children: [
+                          SizedBox(
+                            height: headerHeight,
+                            child: _Header(
+                              paused: controller.paused,
+                              onSettings: () => _showSettings(context),
+                            ),
+                          ),
+                          Expanded(
+                            child: Align(
+                              alignment: Alignment.topCenter,
+                              child: _Preview(
                                 controller: controller,
-                                wallpaperIndex: controller.selectedIndex,
+                                maximumHeight: previewHeight,
+                                draggingWallpaper: draggingWallpaper,
+                                onRemoveWallpaper: controller.removeAt,
+                                onAdd: _addImages,
+                                onCrop: () => context.router.push(
+                                  CropEditorRoute(
+                                    controller: controller,
+                                    wallpaperIndex: controller.selectedIndex,
+                                  ),
+                                ),
                               ),
                             ),
                           ),
-                        ),
+                          if (controller.hasWallpapers)
+                            SizedBox(
+                              height: collectionHeight,
+                              child: _WallpaperStrip(
+                                controller: controller,
+                                onAdd: _addImages,
+                                onDragChanged: (dragging) {
+                                  if (draggingWallpaper == dragging) return;
+                                  setState(() => draggingWallpaper = dragging);
+                                },
+                              ),
+                            ),
+                          SizedBox(height: compact ? 10 : 18),
+                        ],
                       ),
-                      if (controller.hasWallpapers)
-                        SizedBox(
-                          height: collectionHeight,
-                          child: _WallpaperStrip(
-                            controller: controller,
-                            onAdd: _addImages,
-                            onDragChanged: (dragging) {
-                              if (draggingWallpaper == dragging) return;
-                              setState(() => draggingWallpaper = dragging);
-                            },
-                          ),
-                        ),
-                      SizedBox(height: compact ? 10 : 18),
-                    ],
-                  ),
-                );
-              },
-            ),
+                    );
+                  },
+                ),
+              ),
+              if (importingImages) const _ImportOverlay(),
+            ],
           ),
         );
       },
@@ -136,11 +148,20 @@ class _HomeScreenState extends State<HomeScreen> {
       if (choice.remember) await controller.setPhotoSource(source);
     }
 
-    if (source == PhotoSource.files) {
-      await controller.addImagesFromFiles();
-    } else {
-      await controller.addImages();
+    final overlayTimer = Timer(importOverlayDelay, () {
+      if (mounted) setState(() => importingImages = true);
+    });
+    try {
+      if (source == PhotoSource.files) {
+        await controller.addImagesFromFiles();
+      } else {
+        await controller.addImages();
+      }
+    } finally {
+      overlayTimer.cancel();
+      if (mounted) setState(() => importingImages = false);
     }
+
     if (!mounted || controller.lastNativeError == null) return;
     ScaffoldMessenger.of(context)
       ..hideCurrentSnackBar()
@@ -165,6 +186,68 @@ class _HomeScreenState extends State<HomeScreen> {
           ),
         ),
       );
+  }
+}
+
+class _ImportOverlay extends StatelessWidget {
+  const _ImportOverlay();
+
+  @override
+  Widget build(BuildContext context) {
+    return Positioned.fill(
+      key: const ValueKey('import-loading-overlay'),
+      child: ColoredBox(
+        color: Colors.black.withValues(alpha: .58),
+        child: Center(
+          child: Container(
+            constraints: const BoxConstraints(maxWidth: 280),
+            margin: const EdgeInsets.symmetric(horizontal: 32),
+            padding: const EdgeInsets.fromLTRB(28, 26, 28, 24),
+            decoration: BoxDecoration(
+              color: WakeWallColors.surface,
+              borderRadius: BorderRadius.circular(20),
+              border: Border.all(
+                color: WakeWallColors.outline.withValues(alpha: .45),
+              ),
+              boxShadow: const [
+                BoxShadow(
+                  color: Colors.black54,
+                  blurRadius: 28,
+                  offset: Offset(0, 12),
+                ),
+              ],
+            ),
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                const SizedBox(
+                  width: 38,
+                  height: 38,
+                  child: CircularProgressIndicator(
+                    strokeWidth: 3,
+                    color: WakeWallColors.tealStrong,
+                  ),
+                ),
+                const SizedBox(height: 20),
+                Text(
+                  'Adding wallpapers',
+                  textAlign: TextAlign.center,
+                  style: Theme.of(context).textTheme.titleMedium,
+                ),
+                const SizedBox(height: 6),
+                Text(
+                  'Preparing your photos...',
+                  textAlign: TextAlign.center,
+                  style: Theme.of(
+                    context,
+                  ).textTheme.bodyMedium?.copyWith(color: WakeWallColors.muted),
+                ),
+              ],
+            ),
+          ),
+        ),
+      ),
+    );
   }
 }
 
