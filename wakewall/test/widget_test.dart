@@ -152,6 +152,32 @@ void main() {
     expect(find.byKey(const ValueKey('backup-loading-overlay')), findsNothing);
   });
 
+  testWidgets('restore warns before replacing a populated setup', (
+    tester,
+  ) async {
+    final bridge = _PopulatedBridge();
+    final controller = WakeWallController(bridge: bridge);
+    await tester.pumpWidget(WakeWallApp(controller: controller));
+    await tester.pumpAndSettle();
+
+    await tester.tap(find.byTooltip('Settings'));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('Restore'));
+    await tester.pumpAndSettle();
+
+    expect(find.text('Replace current setup?'), findsOneWidget);
+    expect(
+      find.text(
+        'Restoring a backup will replace your current wallpapers, order, crops, and settings.',
+      ),
+      findsOneWidget,
+    );
+
+    await tester.tap(find.text('Cancel'));
+    await tester.pumpAndSettle();
+    expect(find.text('Replace current setup?'), findsNothing);
+  });
+
   testWidgets('WakeWall renders the populated home screen', (tester) async {
     final controller = WakeWallController(bridge: _PopulatedBridge());
     await tester.pumpWidget(WakeWallApp(controller: controller));

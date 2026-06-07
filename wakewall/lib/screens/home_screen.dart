@@ -813,6 +813,30 @@ class _SettingsSheetState extends State<_SettingsSheet> {
   }
 
   Future<void> _backup(bool restore) async {
+    if (restore && controller.wallpapers.length > 1) {
+      final confirmed = await showDialog<bool>(
+        context: context,
+        builder: (context) => AlertDialog(
+          backgroundColor: WakeWallColors.surface,
+          title: const Text('Replace current setup?'),
+          content: const Text(
+            'Restoring a backup will replace your current wallpapers, order, crops, and settings.',
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.pop(context, false),
+              child: const Text('Cancel'),
+            ),
+            FilledButton(
+              onPressed: () => Navigator.pop(context, true),
+              child: const Text('Restore backup'),
+            ),
+          ],
+        ),
+      );
+      if (confirmed != true || !mounted) return;
+    }
+
     setState(() => handlingBackup = true);
     fileProgressTitle = restore ? 'Restoring backup' : 'Creating backup';
     void beginProgressDelay() {
