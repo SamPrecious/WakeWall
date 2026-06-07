@@ -14,6 +14,9 @@ class Wallpaper {
     required this.style,
     this.uri,
     this.thumbnail,
+    this.preview,
+    this.imageWidth,
+    this.imageHeight,
     this.crop = const WallpaperCrop(),
   });
 
@@ -23,17 +26,27 @@ class Wallpaper {
   final int style;
   final String? uri;
   final Uint8List? thumbnail;
+  final Uint8List? preview;
+  final int? imageWidth;
+  final int? imageHeight;
   final WallpaperCrop crop;
 
   bool get isUserImage => uri != null;
 
-  Wallpaper copyWith({WallpaperCrop? crop, Uint8List? thumbnail}) => Wallpaper(
+  Wallpaper copyWith({
+    WallpaperCrop? crop,
+    Uint8List? thumbnail,
+    Uint8List? preview,
+  }) => Wallpaper(
     id: id,
     name: name,
     palette: palette,
     style: style,
     uri: uri,
     thumbnail: thumbnail ?? this.thumbnail,
+    preview: preview ?? this.preview,
+    imageWidth: imageWidth,
+    imageHeight: imageHeight,
     crop: crop ?? this.crop,
   );
 }

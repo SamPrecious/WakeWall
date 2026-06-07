@@ -53,6 +53,18 @@ abstract final class WakeWallTheme {
         showDragHandle: true,
         dragHandleColor: WakeWallColors.outline,
       ),
+      snackBarTheme: SnackBarThemeData(
+        behavior: SnackBarBehavior.floating,
+        backgroundColor: WakeWallColors.raisedSurface,
+        elevation: 8,
+        insetPadding: const EdgeInsets.fromLTRB(20, 0, 20, 20),
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(18)),
+        contentTextStyle: const TextStyle(
+          color: Color(0xFFE3E3E8),
+          fontSize: 14,
+          fontWeight: FontWeight.w600,
+        ),
+      ),
       filledButtonTheme: FilledButtonThemeData(
         style: FilledButton.styleFrom(
           backgroundColor: WakeWallColors.teal,

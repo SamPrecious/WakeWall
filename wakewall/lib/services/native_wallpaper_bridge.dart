@@ -22,6 +22,16 @@ class NativeWallpaperBridge {
     return result ?? const {};
   }
 
+  Future<Map<String, Object?>> importNormalizedImages(
+    List<Map<String, Object?>> images,
+  ) async {
+    final result = await _channel.invokeMapMethod<String, Object?>(
+      'importNormalizedImages',
+      {'images': images},
+    );
+    return result ?? const {};
+  }
+
   Future<Map<String, Object?>> removeWallpaper(int index) async {
     final result = await _channel.invokeMapMethod<String, Object?>(
       'removeWallpaper',
@@ -30,12 +40,11 @@ class NativeWallpaperBridge {
     return result ?? const {};
   }
 
-  Future<Map<String, Object?>> moveWallpaper(int oldIndex, int newIndex) async {
-    final result = await _channel.invokeMapMethod<String, Object?>(
-      'moveWallpaper',
-      {'oldIndex': oldIndex, 'newIndex': newIndex},
-    );
-    return result ?? const {};
+  Future<void> moveWallpaper(int oldIndex, int newIndex) async {
+    await _channel.invokeMethod<void>('moveWallpaper', {
+      'oldIndex': oldIndex,
+      'newIndex': newIndex,
+    });
   }
 
   Future<void> updateSettings({

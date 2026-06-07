@@ -4,15 +4,20 @@ import android.app.WallpaperManager
 import android.content.ComponentName
 import android.content.Intent
 import android.net.Uri
-import android.os.Build
-import android.provider.MediaStore
-import io.flutter.embedding.android.FlutterActivity
+import androidx.activity.result.PickVisualMediaRequest
+import androidx.activity.result.contract.ActivityResultContracts
+import io.flutter.embedding.android.FlutterFragmentActivity
 import io.flutter.embedding.engine.FlutterEngine
 import io.flutter.plugin.common.MethodChannel
 
-class MainActivity : FlutterActivity() {
+class MainActivity : FlutterFragmentActivity() {
     private val channelName = "com.zambl.wakewall/control"
     private var pendingImageResult: MethodChannel.Result? = null
+    private val imagePicker = registerForActivityResult(
+        ActivityResultContracts.PickMultipleVisualMedia(),
+    ) { uris ->
+        handlePickedImages(uris)
+    }
 
     // Connects Flutter's controls to the Android wallpaper service.
     override fun configureFlutterEngine(flutterEngine: FlutterEngine) {
@@ -21,6 +26,23 @@ class MainActivity : FlutterActivity() {
             .setMethodCallHandler { call, result ->
                 when (call.method) {
                     "pickImages" -> pickImages(result)
+                    "importNormalizedImages" -> {
+                        val images = call.argument<List<Map<String, Any>>>("images").orEmpty()
+                            .mapNotNull { image ->
+                                val name = image["name"] as? String ?: return@mapNotNull null
+                                val bytes = image["bytes"] as? ByteArray ?: return@mapNotNull null
+                                NormalizedImport(name, bytes)
+                            }
+                        val store = WakeWallStore(this)
+                        val imported = store.addNormalizedImages(images)
+                        notifyWallpaperService()
+                        result.success(
+                            store.configuration().toMutableMap().apply {
+                                put("normalizedImportedCount", imported)
+                                put("normalizedFailedCount", images.size - imported)
+                            }
+                        )
+                    }
                     "openWallpaperPicker" -> {
                         openWallpaperPicker()
                         result.success(null)
@@ -58,7 +80,7 @@ class MainActivity : FlutterActivity() {
                             call.argument<Int>("newIndex") ?: -1,
                         )
                         notifyWallpaperService()
-                        result.success(store.configuration())
+                        result.success(null)
                     }
 
                     "updateSettings" -> {
@@ -93,24 +115,35 @@ class MainActivity : FlutterActivity() {
             }
     }
 
-    override fun onActivityResult(requestCode: Int, resultCode: Int, data: Intent?) {
-        super.onActivityResult(requestCode, resultCode, data)
-        if (requestCode != PICK_IMAGES_REQUEST) return
-
-        val uris = mutableListOf<Uri>()
-        data?.data?.let(uris::add)
-        data?.clipData?.let { clip ->
-            repeat(clip.itemCount) { uris.add(clip.getItemAt(it).uri) }
-        }
+    private fun handlePickedImages(uris: List<Uri>) {
         uris.forEach { uri ->
             runCatching {
                 contentResolver.takePersistableUriPermission(uri, Intent.FLAG_GRANT_READ_URI_PERMISSION)
             }
         }
         val store = WakeWallStore(this)
-        store.addImages(uris)
+        val summary = store.addImages(uris)
         notifyWallpaperService()
-        pendingImageResult?.success(store.configuration())
+        pendingImageResult?.success(
+            store.configuration().toMutableMap().apply {
+                put("importedCount", summary.imported)
+                put("failedCount", summary.failed)
+                put(
+                    "failedImages",
+                    summary.failedImports.map {
+                        mapOf(
+                            "name" to it.name,
+                            "bytes" to it.bytes,
+                            "diagnostics" to it.diagnostics,
+                        )
+                    },
+                )
+                put(
+                    "failedWithoutBytesCount",
+                    summary.failed - summary.failedImports.size,
+                )
+            }
+        )
         pendingImageResult = null
     }
 
@@ -120,23 +153,7 @@ class MainActivity : FlutterActivity() {
             return
         }
         pendingImageResult = result
-        val intent = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
-            Intent(MediaStore.ACTION_PICK_IMAGES).apply {
-                type = "image/*"
-                putExtra(
-                    MediaStore.EXTRA_PICK_IMAGES_MAX,
-                    MediaStore.getPickImagesMaxLimit().coerceAtMost(50),
-                )
-                addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
-            }
-        } else {
-            Intent(Intent.ACTION_PICK, MediaStore.Images.Media.EXTERNAL_CONTENT_URI).apply {
-                type = "image/*"
-                putExtra(Intent.EXTRA_ALLOW_MULTIPLE, true)
-                addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
-            }
-        }
-        startActivityForResult(intent, PICK_IMAGES_REQUEST)
+        imagePicker.launch(PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.ImageOnly))
     }
 
     private fun notifyWallpaperService() {
@@ -153,9 +170,5 @@ class MainActivity : FlutterActivity() {
         } catch (_: Exception) {
             startActivity(Intent(WallpaperManager.ACTION_LIVE_WALLPAPER_CHOOSER))
         }
-    }
-
-    companion object {
-        private const val PICK_IMAGES_REQUEST = 4401
     }
 }

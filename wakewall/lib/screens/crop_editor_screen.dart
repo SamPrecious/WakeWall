@@ -81,18 +81,31 @@ class _CropEditorScreenState extends State<CropEditorScreen> {
                             .clamp(1.0, 4.0);
                         final delta =
                             details.focalPoint - gestureStartFocalPoint;
-                        final maxOffset = (nextScale - 1) / 2;
+                        final sourceWidth =
+                            wallpaper.imageWidth?.toDouble() ?? width;
+                        final sourceHeight =
+                            wallpaper.imageHeight?.toDouble() ?? height;
+                        final coverScale = math.max(
+                          width / sourceWidth,
+                          height / sourceHeight,
+                        );
+                        final maxOffsetX =
+                            (sourceWidth * coverScale * nextScale - width) /
+                            (2 * width);
+                        final maxOffsetY =
+                            (sourceHeight * coverScale * nextScale - height) /
+                            (2 * height);
                         // Keeps the wallpaper inside the preview while it is moved.
                         setState(() {
                           crop = WallpaperCrop(
                             scale: nextScale,
                             offsetX: (gestureStartX + delta.dx / width).clamp(
-                              -maxOffset,
-                              maxOffset,
+                              -maxOffsetX,
+                              maxOffsetX,
                             ),
                             offsetY: (gestureStartY + delta.dy / height).clamp(
-                              -maxOffset,
-                              maxOffset,
+                              -maxOffsetY,
+                              maxOffsetY,
                             ),
                           );
                         });
@@ -105,6 +118,7 @@ class _CropEditorScreenState extends State<CropEditorScreen> {
                             child: AbstractWallpaper(
                               wallpaper: wallpaper,
                               crop: crop,
+                              previewBytes: widget.controller.selectedPreview,
                               borderRadius: BorderRadius.circular(18),
                             ),
                           ),

@@ -230,7 +230,6 @@ class WakeWallService : WallpaperService() {
             val crop = store.crop(index)
             canvas.drawColor(Color.BLACK)
             canvas.save()
-            applyCrop(canvas, crop, width, height)
 
             val scale = if (store.fit == "fitEntireImage") {
                 min(width / bitmap.width, height / bitmap.height)
@@ -239,6 +238,17 @@ class WakeWallService : WallpaperService() {
             }
             val drawnWidth = bitmap.width * scale
             val drawnHeight = bitmap.height * scale
+            val maxOffsetX = max(0f, (drawnWidth * crop.scale - width) / (2f * width))
+            val maxOffsetY = max(0f, (drawnHeight * crop.scale - height) / (2f * height))
+            applyCrop(
+                canvas,
+                crop.copy(
+                    offsetX = crop.offsetX.coerceIn(-maxOffsetX, maxOffsetX),
+                    offsetY = crop.offsetY.coerceIn(-maxOffsetY, maxOffsetY),
+                ),
+                width,
+                height,
+            )
             val destination = RectF(
                 (width - drawnWidth) / 2f,
                 (height - drawnHeight) / 2f,

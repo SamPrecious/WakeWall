@@ -1,8 +1,12 @@
+import 'dart:convert';
+
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:wakewall/app.dart';
 import 'package:wakewall/controllers/wakewall_controller.dart';
+import 'package:wakewall/models/wallpaper.dart';
 import 'package:wakewall/services/native_wallpaper_bridge.dart';
+import 'package:wakewall/widgets/abstract_wallpaper.dart';
 
 void main() {
   testWidgets('WakeWall starts with an empty collection', (tester) async {
@@ -11,8 +15,26 @@ void main() {
     await tester.pumpAndSettle();
 
     expect(find.text('WakeWall'), findsOneWidget);
-    expect(find.text('Add Images'), findsOneWidget);
+    expect(find.text('Add Wallpapers'), findsOneWidget);
+    expect(find.text('Choose images to begin.'), findsNothing);
+    expect(find.byKey(const ValueKey('empty-add-wallpapers')), findsOneWidget);
     expect(find.text('Up Next'), findsNothing);
+  });
+
+  testWidgets('settings keeps the simple shuffle-first controls', (
+    tester,
+  ) async {
+    final controller = WakeWallController(bridge: _EmptyBridge());
+    await tester.pumpWidget(WakeWallApp(controller: controller));
+    await tester.pumpAndSettle();
+
+    await tester.tap(find.byTooltip('Settings'));
+    await tester.pumpAndSettle();
+
+    expect(find.text('Shuffle'), findsOneWidget);
+    expect(find.text('Sequential'), findsOneWidget);
+    expect(find.text('Fit mode'), findsNothing);
+    expect(find.text('Use WakeWall'), findsOneWidget);
   });
 
   testWidgets('WakeWall renders the populated home screen', (tester) async {
@@ -25,13 +47,98 @@ void main() {
     expect(find.text('ADD'), findsOneWidget);
 
     final firstThumbnail = tester.getSize(
-      find.byKey(const ValueKey('wallpaper-thumbnail-0')),
+      find.byKey(const ValueKey('wallpaper-thumbnail-tidal')),
     );
     final secondThumbnail = tester.getSize(
-      find.byKey(const ValueKey('wallpaper-thumbnail-1')),
+      find.byKey(const ValueKey('wallpaper-thumbnail-silver')),
     );
     expect(firstThumbnail.height, greaterThan(firstThumbnail.width * 1.5));
     expect(firstThumbnail, secondThumbnail);
+  });
+
+  testWidgets('large preview keeps a complete landscape source available', (
+    tester,
+  ) async {
+    final image = base64Decode(
+      'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII=',
+    );
+    final wallpaper = Wallpaper(
+      id: 'group-photo',
+      name: 'Group photo',
+      palette: const [Colors.black, Colors.black, Colors.white],
+      style: 0,
+      uri: 'local:group-photo.jpg',
+      thumbnail: image,
+      imageWidth: 1600,
+      imageHeight: 900,
+    );
+
+    await tester.pumpWidget(
+      MaterialApp(
+        home: Center(
+          child: SizedBox(
+            width: 200,
+            height: 400,
+            child: AbstractWallpaper(wallpaper: wallpaper, previewBytes: image),
+          ),
+        ),
+      ),
+    );
+
+    expect(tester.takeException(), isNull);
+  });
+
+  testWidgets('holding a wallpaper reveals the remove target', (tester) async {
+    final controller = WakeWallController(bridge: _PopulatedBridge());
+    await tester.pumpWidget(WakeWallApp(controller: controller));
+    await tester.pumpAndSettle();
+
+    final gesture = await tester.startGesture(
+      tester.getCenter(find.byKey(const ValueKey('wallpaper-drag-0'))),
+    );
+    await tester.pump(const Duration(milliseconds: 650));
+
+    final overlay = tester.widget<AnimatedOpacity>(
+      find.byKey(const ValueKey('wallpaper-remove-overlay')),
+    );
+    expect(overlay.opacity, 1);
+
+    await gesture.up();
+    await tester.pumpAndSettle();
+  });
+
+  testWidgets('wallpapers can be dragged to remove and reorder', (
+    tester,
+  ) async {
+    final bridge = _PopulatedBridge();
+    final controller = WakeWallController(bridge: bridge);
+    await tester.pumpWidget(WakeWallApp(controller: controller));
+    await tester.pumpAndSettle();
+
+    var gesture = await tester.startGesture(
+      tester.getCenter(find.byKey(const ValueKey('wallpaper-drag-0'))),
+    );
+    await tester.pump(const Duration(milliseconds: 650));
+    await gesture.moveTo(
+      tester.getCenter(find.byKey(const ValueKey('wallpaper-remove-target'))),
+    );
+    await tester.pump();
+    await gesture.up();
+    await tester.pumpAndSettle();
+    expect(bridge.wallpapers.length, 3);
+
+    final firstId = bridge.wallpapers.first['sampleIndex'];
+    gesture = await tester.startGesture(
+      tester.getCenter(find.byKey(const ValueKey('wallpaper-drag-0'))),
+    );
+    await tester.pump(const Duration(milliseconds: 650));
+    await gesture.moveTo(
+      tester.getCenter(find.byKey(const ValueKey('wallpaper-drag-2'))),
+    );
+    await tester.pump();
+    await gesture.up();
+    await tester.pumpAndSettle();
+    expect(bridge.wallpapers[2]['sampleIndex'], firstId);
   });
 
   testWidgets('crop editor opens and accepts a pinch gesture', (tester) async {
@@ -79,18 +186,32 @@ class _EmptyBridge extends NativeWallpaperBridge {
 }
 
 class _PopulatedBridge extends _EmptyBridge {
+  final List<Map<String, Object?>> wallpapers = List.generate(
+    4,
+    (index) => {
+      'sampleIndex': index,
+      'crop': const {'scale': 1.0, 'offsetX': 0.0, 'offsetY': 0.0},
+    },
+  );
+
   @override
   Future<Map<String, Object?>> configuration() async => {
     'index': 0,
     'paused': false,
     'shuffle': false,
     'fit': 'cropToFill',
-    'wallpapers': List.generate(
-      4,
-      (index) => {
-        'sampleIndex': index,
-        'crop': const {'scale': 1.0, 'offsetX': 0.0, 'offsetY': 0.0},
-      },
-    ),
+    'wallpapers': wallpapers,
   };
+
+  @override
+  Future<Map<String, Object?>> removeWallpaper(int index) async {
+    wallpapers.removeAt(index);
+    return configuration();
+  }
+
+  @override
+  Future<Map<String, Object?>> moveWallpaper(int oldIndex, int newIndex) async {
+    wallpapers.insert(newIndex, wallpapers.removeAt(oldIndex));
+    return configuration();
+  }
 }

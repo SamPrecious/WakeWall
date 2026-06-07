@@ -1,7 +1,6 @@
-import 'dart:async';
-
 import 'package:flutter/foundation.dart';
 import 'package:flutter/services.dart';
+import 'package:image/image.dart' as image;
 
 import '../models/wallpaper.dart';
 import '../services/native_wallpaper_bridge.dart';
@@ -15,7 +14,7 @@ class WakeWallController extends ChangeNotifier {
 
   int _selectedIndex = 0;
   bool _paused = false;
-  RotationOrder _order = RotationOrder.sequential;
+  RotationOrder _order = RotationOrder.shuffle;
   WallpaperFit _fit = WallpaperFit.cropToFill;
   String? _lastNativeError;
 
@@ -25,6 +24,7 @@ class WakeWallController extends ChangeNotifier {
   bool get paused => _paused;
   RotationOrder get order => _order;
   WallpaperFit get fit => _fit;
+  Uint8List? get selectedPreview => selectedWallpaper?.preview;
   String? get lastNativeError => _lastNativeError;
 
   Wallpaper? get selectedWallpaper =>
@@ -84,8 +84,46 @@ class WakeWallController extends ChangeNotifier {
   }
 
   Future<void> addImages() async {
+    await _importImages(_bridge.pickImages);
+  }
+
+  Future<void> _importImages(
+    Future<Map<String, Object?>> Function() picker,
+  ) async {
     await _runNative(() async {
-      _applyConfiguration(await _bridge.pickImages());
+      final configuration = await picker();
+      _applyConfiguration(configuration);
+      final failedImages =
+          configuration['failedImages'] as List<Object?>? ?? const [];
+      final failedWithoutBytes =
+          (configuration['failedWithoutBytesCount'] as num?)?.toInt() ?? 0;
+      final normalized = await Future.wait(
+        failedImages.map((value) {
+          final data = Map<Object?, Object?>.from(value! as Map);
+          return compute(_normalizeFailedImage, {
+            'name': data['name'] as String? ?? 'Photo',
+            'bytes': data['bytes'] as Uint8List,
+          });
+        }),
+      );
+      final recovered = normalized.whereType<Map<String, Object?>>().toList();
+      var storedRecovered = 0;
+      if (recovered.isNotEmpty) {
+        final recoveredConfiguration = await _bridge.importNormalizedImages(
+          recovered,
+        );
+        storedRecovered =
+            (recoveredConfiguration['normalizedImportedCount'] as num?)
+                ?.toInt() ??
+            0;
+        _applyConfiguration(recoveredConfiguration);
+      }
+      final failed = failedWithoutBytes + failedImages.length - storedRecovered;
+      if (failed > 0) {
+        _lastNativeError = failed == 1
+            ? 'One photo could not be imported.'
+            : '$failed photos could not be imported.';
+      }
       notifyListeners();
     });
   }
@@ -107,10 +145,13 @@ class WakeWallController extends ChangeNotifier {
         oldIndex == newIndex) {
       return;
     }
-    await _runNative(() async {
-      _applyConfiguration(await _bridge.moveWallpaper(oldIndex, newIndex));
-      notifyListeners();
-    });
+    final selectedId = selectedWallpaper?.id;
+    _wallpapers.insert(newIndex, _wallpapers.removeAt(oldIndex));
+    _selectedIndex = selectedId == null
+        ? 0
+        : _wallpapers.indexWhere((wallpaper) => wallpaper.id == selectedId);
+    notifyListeners();
+    await _runNative(() => _bridge.moveWallpaper(oldIndex, newIndex));
   }
 
   Future<void> setPaused(bool value) async {
@@ -195,6 +236,9 @@ class WakeWallController extends ChangeNotifier {
       style: 0,
       uri: data['uri']! as String,
       thumbnail: data['thumbnail'] as Uint8List?,
+      preview: data['preview'] as Uint8List?,
+      imageWidth: (data['imageWidth'] as num?)?.toInt(),
+      imageHeight: (data['imageHeight'] as num?)?.toInt(),
       crop: crop,
     );
   }
@@ -202,12 +246,37 @@ class WakeWallController extends ChangeNotifier {
   // Keeps Android-only errors from breaking previews on other platforms.
   Future<void> _runNative(Future<void> Function() action) async {
     try {
-      await action();
       _lastNativeError = null;
+      await action();
     } on MissingPluginException {
       _lastNativeError = 'Native wallpaper controls require Android.';
     } on PlatformException catch (error) {
       _lastNativeError = error.message ?? error.code;
+    } catch (_) {
+      _lastNativeError = 'The selected photo could not be imported.';
+      notifyListeners();
     }
+  }
+}
+
+// Rewrites photos Android cannot decode into a clean, standard JPEG.
+Map<String, Object?>? _normalizeFailedImage(Map<String, Object?> value) {
+  try {
+    final decoded = image.decodeImage(value['bytes']! as Uint8List);
+    if (decoded == null) return null;
+    var normalized = image.bakeOrientation(decoded);
+    if (normalized.width > 4096 || normalized.height > 4096) {
+      if (normalized.width >= normalized.height) {
+        normalized = image.copyResize(normalized, width: 4096);
+      } else {
+        normalized = image.copyResize(normalized, height: 4096);
+      }
+    }
+    return {
+      'name': value['name']! as String,
+      'bytes': Uint8List.fromList(image.encodeJpg(normalized, quality: 94)),
+    };
+  } catch (_) {
+    return null;
   }
 }

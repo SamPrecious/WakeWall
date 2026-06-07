@@ -1,5 +1,6 @@
 import 'package:auto_route/auto_route.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 
 import '../controllers/wakewall_controller.dart';
 import '../models/wallpaper.dart';
@@ -8,10 +9,19 @@ import '../theme/wakewall_theme.dart';
 import '../widgets/abstract_wallpaper.dart';
 
 @RoutePage()
-class HomeScreen extends StatelessWidget {
+class HomeScreen extends StatefulWidget {
   const HomeScreen({required this.controller, super.key});
 
   final WakeWallController controller;
+
+  @override
+  State<HomeScreen> createState() => _HomeScreenState();
+}
+
+class _HomeScreenState extends State<HomeScreen> {
+  bool draggingWallpaper = false;
+
+  WakeWallController get controller => widget.controller;
 
   @override
   Widget build(BuildContext context) {
@@ -67,7 +77,9 @@ class HomeScreen extends StatelessWidget {
                           child: _Preview(
                             controller: controller,
                             maximumHeight: previewHeight,
-                            onAdd: controller.addImages,
+                            draggingWallpaper: draggingWallpaper,
+                            onRemoveWallpaper: controller.removeAt,
+                            onAdd: _addImages,
                             onCrop: () => context.router.push(
                               CropEditorRoute(
                                 controller: controller,
@@ -80,7 +92,14 @@ class HomeScreen extends StatelessWidget {
                       if (controller.hasWallpapers)
                         SizedBox(
                           height: collectionHeight,
-                          child: _WallpaperStrip(controller: controller),
+                          child: _WallpaperStrip(
+                            controller: controller,
+                            onAdd: _addImages,
+                            onDragChanged: (dragging) {
+                              if (draggingWallpaper == dragging) return;
+                              setState(() => draggingWallpaper = dragging);
+                            },
+                          ),
                         ),
                       SizedBox(height: compact ? 10 : 18),
                     ],
@@ -101,6 +120,34 @@ class HomeScreen extends StatelessWidget {
       useSafeArea: true,
       builder: (_) => _SettingsSheet(controller: controller),
     );
+  }
+
+  Future<void> _addImages() async {
+    await controller.addImages();
+    if (!mounted || controller.lastNativeError == null) return;
+    ScaffoldMessenger.of(context)
+      ..hideCurrentSnackBar()
+      ..showSnackBar(
+        SnackBar(
+          duration: const Duration(seconds: 5),
+          content: Row(
+            children: [
+              const Icon(
+                Icons.error_outline_rounded,
+                color: WakeWallColors.danger,
+                size: 21,
+              ),
+              const SizedBox(width: 12),
+              Expanded(child: Text(controller.lastNativeError!)),
+            ],
+          ),
+          action: SnackBarAction(
+            label: 'Dismiss',
+            textColor: WakeWallColors.tealStrong,
+            onPressed: () {},
+          ),
+        ),
+      );
   }
 }
 
@@ -152,12 +199,16 @@ class _Preview extends StatelessWidget {
   const _Preview({
     required this.controller,
     required this.maximumHeight,
+    required this.draggingWallpaper,
+    required this.onRemoveWallpaper,
     required this.onAdd,
     required this.onCrop,
   });
 
   final WakeWallController controller;
   final double maximumHeight;
+  final bool draggingWallpaper;
+  final ValueChanged<int> onRemoveWallpaper;
   final VoidCallback onAdd;
   final VoidCallback onCrop;
 
@@ -186,41 +237,97 @@ class _Preview extends StatelessWidget {
         ),
       ),
       clipBehavior: Clip.antiAlias,
-      child: AnimatedSwitcher(
-        duration: const Duration(milliseconds: 420),
-        switchInCurve: Curves.easeOutCubic,
-        switchOutCurve: Curves.easeInCubic,
-        child: controller.hasWallpapers
-            ? Stack(
-                key: const ValueKey('populated'),
-                fit: StackFit.expand,
-                children: [
-                  AbstractWallpaper(
-                    wallpaper: controller.selectedWallpaper!,
-                    borderRadius: radius,
-                  ),
-                  Positioned(
-                    right: 14,
-                    bottom: 14,
-                    child: Row(
-                      children: [
-                        _OverlayButton(
-                          icon: Icons.crop_rounded,
-                          tooltip: 'Adjust crop',
-                          onTap: onCrop,
+      child: Stack(
+        fit: StackFit.expand,
+        children: [
+          AnimatedSwitcher(
+            duration: const Duration(milliseconds: 420),
+            switchInCurve: Curves.easeOutCubic,
+            switchOutCurve: Curves.easeInCubic,
+            child: controller.hasWallpapers
+                ? Stack(
+                    key: const ValueKey('populated'),
+                    fit: StackFit.expand,
+                    children: [
+                      AnimatedSwitcher(
+                        duration: const Duration(milliseconds: 180),
+                        switchInCurve: Curves.easeOut,
+                        switchOutCurve: Curves.easeIn,
+                        child: AbstractWallpaper(
+                          key: ValueKey(
+                            'main-preview-${controller.selectedWallpaper!.id}',
+                          ),
+                          wallpaper: controller.selectedWallpaper!,
+                          previewBytes: controller.selectedPreview,
+                          borderRadius: radius,
                         ),
-                        const SizedBox(width: 8),
-                        _OverlayButton(
-                          icon: Icons.shuffle_rounded,
-                          tooltip: 'Next wallpaper',
-                          onTap: controller.next,
+                      ),
+                      Positioned(
+                        right: 14,
+                        bottom: 14,
+                        child: Row(
+                          children: [
+                            _OverlayButton(
+                              icon: Icons.crop_rounded,
+                              tooltip: 'Adjust crop',
+                              onTap: onCrop,
+                            ),
+                            const SizedBox(width: 8),
+                            _OverlayButton(
+                              icon: Icons.shuffle_rounded,
+                              tooltip: 'Next wallpaper',
+                              onTap: controller.next,
+                            ),
+                          ],
                         ),
-                      ],
-                    ),
+                      ),
+                    ],
+                  )
+                : _EmptyPreview(key: const ValueKey('empty'), onAdd: onAdd),
+          ),
+          IgnorePointer(
+            ignoring: !draggingWallpaper,
+            child: AnimatedOpacity(
+              key: const ValueKey('wallpaper-remove-overlay'),
+              duration: const Duration(milliseconds: 180),
+              opacity: draggingWallpaper ? 1 : 0,
+              child: ColoredBox(
+                color: Colors.black.withValues(alpha: .38),
+                child: Center(
+                  child: DragTarget<int>(
+                    onWillAcceptWithDetails: (_) => draggingWallpaper,
+                    onAcceptWithDetails: (details) {
+                      HapticFeedback.mediumImpact();
+                      onRemoveWallpaper(details.data);
+                    },
+                    builder: (context, candidates, _) {
+                      final removing = candidates.isNotEmpty;
+                      return AnimatedContainer(
+                        key: const ValueKey('wallpaper-remove-target'),
+                        duration: const Duration(milliseconds: 180),
+                        width: removing ? 96 : 82,
+                        height: removing ? 96 : 82,
+                        decoration: BoxDecoration(
+                          color: removing
+                              ? WakeWallColors.danger
+                              : WakeWallColors.raisedSurface,
+                          shape: BoxShape.circle,
+                        ),
+                        child: Icon(
+                          Icons.delete_outline_rounded,
+                          size: removing ? 42 : 36,
+                          color: removing
+                              ? WakeWallColors.ink
+                              : WakeWallColors.muted,
+                        ),
+                      );
+                    },
                   ),
-                ],
-              )
-            : _EmptyPreview(key: const ValueKey('empty'), onAdd: onAdd),
+                ),
+              ),
+            ),
+          ),
+        ],
       ),
     );
   }
@@ -233,56 +340,23 @@ class _EmptyPreview extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return Stack(
-      children: [
-        const Positioned(
-          top: 18,
-          left: 0,
-          right: 0,
-          child: Center(
-            child: SizedBox(
-              width: 108,
-              height: 30,
-              child: DecoratedBox(
-                decoration: BoxDecoration(
-                  color: Color(0xFF303136),
-                  borderRadius: BorderRadius.all(Radius.circular(18)),
-                ),
-              ),
+    return Material(
+      color: Colors.transparent,
+      child: InkWell(
+        key: const ValueKey('empty-add-wallpapers'),
+        onTap: onAdd,
+        borderRadius: BorderRadius.circular(22),
+        child: Center(
+          child: Text(
+            'Add Wallpapers',
+            style: Theme.of(context).textTheme.displaySmall?.copyWith(
+              color: Colors.white,
+              fontSize: 24,
+              letterSpacing: -.6,
             ),
           ),
         ),
-        Center(
-          child: Padding(
-            padding: const EdgeInsets.symmetric(horizontal: 24),
-            child: Column(
-              mainAxisSize: MainAxisSize.min,
-              children: [
-                const Icon(
-                  Icons.crop_free_rounded,
-                  color: WakeWallColors.muted,
-                  size: 38,
-                ),
-                const SizedBox(height: 28),
-                SizedBox(
-                  width: 170,
-                  child: FilledButton(
-                    onPressed: onAdd,
-                    child: const Text('Add Images'),
-                  ),
-                ),
-                const SizedBox(height: 14),
-                Text(
-                  'Choose images to begin.',
-                  style: Theme.of(
-                    context,
-                  ).textTheme.bodyMedium?.copyWith(color: WakeWallColors.teal),
-                ),
-              ],
-            ),
-          ),
-        ),
-      ],
+      ),
     );
   }
 }
@@ -319,10 +393,48 @@ class _OverlayButton extends StatelessWidget {
   }
 }
 
-class _WallpaperStrip extends StatelessWidget {
-  const _WallpaperStrip({required this.controller});
+class _WallpaperStrip extends StatefulWidget {
+  const _WallpaperStrip({
+    required this.controller,
+    required this.onAdd,
+    required this.onDragChanged,
+  });
 
   final WakeWallController controller;
+  final VoidCallback onAdd;
+  final ValueChanged<bool> onDragChanged;
+
+  @override
+  State<_WallpaperStrip> createState() => _WallpaperStripState();
+}
+
+class _WallpaperStripState extends State<_WallpaperStrip> {
+  final ScrollController scrollController = ScrollController();
+
+  WakeWallController get controller => widget.controller;
+
+  @override
+  void dispose() {
+    scrollController.dispose();
+    super.dispose();
+  }
+
+  // Scrolls the collection when a lifted wallpaper nears either screen edge.
+  void autoScroll(DragUpdateDetails details) {
+    if (!scrollController.hasClients) return;
+    final screenWidth = MediaQuery.sizeOf(context).width;
+    final direction = details.globalPosition.dx < 72
+        ? -1
+        : details.globalPosition.dx > screenWidth - 72
+        ? 1
+        : 0;
+    if (direction == 0) return;
+    final target = (scrollController.offset + direction * 72).clamp(
+      0.0,
+      scrollController.position.maxScrollExtent,
+    );
+    scrollController.jumpTo(target);
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -338,7 +450,7 @@ class _WallpaperStrip extends StatelessWidget {
             ),
             const Spacer(),
             TextButton.icon(
-              onPressed: controller.addImages,
+              onPressed: widget.onAdd,
               iconAlignment: IconAlignment.end,
               icon: const Icon(Icons.add_rounded, size: 19),
               label: const Text('ADD'),
@@ -358,37 +470,58 @@ class _WallpaperStrip extends StatelessWidget {
               final tileWidth = constraints.maxHeight * phoneRatio;
 
               return ListView.separated(
+                controller: scrollController,
                 scrollDirection: Axis.horizontal,
                 itemCount: controller.wallpapers.length,
                 separatorBuilder: (_, _) => const SizedBox(width: 10),
                 itemBuilder: (context, index) {
                   final selected = index == controller.selectedIndex;
-                  return GestureDetector(
-                    onTap: () => controller.select(index),
-                    onLongPress: () => _showWallpaperActions(context, index),
-                    child: AnimatedContainer(
-                      key: ValueKey('wallpaper-thumbnail-$index'),
-                      duration: const Duration(milliseconds: 220),
-                      width: tileWidth,
-                      height: tileHeight,
-                      padding: const EdgeInsets.all(2.5),
-                      decoration: BoxDecoration(
-                        color: selected
-                            ? WakeWallColors.tealStrong.withValues(alpha: .12)
-                            : Colors.transparent,
-                        borderRadius: BorderRadius.circular(13),
-                        border: Border.all(
-                          color: selected
-                              ? WakeWallColors.tealStrong
-                              : Colors.transparent,
-                          width: 1,
+                  final tile = _WallpaperTile(
+                    wallpaper: controller.wallpapers[index],
+                    selected: selected,
+                    width: tileWidth,
+                    height: tileHeight,
+                  );
+                  return DragTarget<int>(
+                    onWillAcceptWithDetails: (details) => details.data != index,
+                    onAcceptWithDetails: (details) {
+                      HapticFeedback.selectionClick();
+                      controller.move(details.data, index);
+                    },
+                    builder: (context, candidates, _) {
+                      final accepting = candidates.isNotEmpty;
+                      return AnimatedPadding(
+                        duration: const Duration(milliseconds: 160),
+                        padding: EdgeInsets.only(left: accepting ? 14 : 0),
+                        child: LongPressDraggable<int>(
+                          key: ValueKey('wallpaper-drag-$index'),
+                          data: index,
+                          rootOverlay: true,
+                          dragAnchorStrategy: pointerDragAnchorStrategy,
+                          onDragStarted: () {
+                            HapticFeedback.mediumImpact();
+                            widget.onDragChanged(true);
+                          },
+                          onDragUpdate: autoScroll,
+                          onDragEnd: (_) => widget.onDragChanged(false),
+                          feedback: Transform.scale(
+                            scale: 1.08,
+                            child: Material(
+                              color: Colors.transparent,
+                              elevation: 14,
+                              shadowColor: Colors.black,
+                              borderRadius: BorderRadius.circular(13),
+                              child: tile,
+                            ),
+                          ),
+                          childWhenDragging: Opacity(opacity: .18, child: tile),
+                          child: GestureDetector(
+                            onTap: () => controller.select(index),
+                            child: tile,
+                          ),
                         ),
-                      ),
-                      child: AbstractWallpaper(
-                        wallpaper: controller.wallpapers[index],
-                        borderRadius: BorderRadius.circular(10.5),
-                      ),
-                    ),
+                      );
+                    },
                   );
                 },
               );
@@ -398,67 +531,42 @@ class _WallpaperStrip extends StatelessWidget {
       ],
     );
   }
+}
 
-  Future<void> _showWallpaperActions(BuildContext context, int index) {
-    final wallpaper = controller.wallpapers[index];
-    return showModalBottomSheet<void>(
-      context: context,
-      builder: (context) => SafeArea(
-        child: Padding(
-          padding: const EdgeInsets.fromLTRB(18, 0, 18, 18),
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            crossAxisAlignment: CrossAxisAlignment.stretch,
-            children: [
-              Text(
-                wallpaper.name,
-                style: Theme.of(context).textTheme.titleLarge,
-              ),
-              const SizedBox(height: 12),
-              Row(
-                children: [
-                  Expanded(
-                    child: OutlinedButton.icon(
-                      onPressed: index == 0
-                          ? null
-                          : () {
-                              controller.move(index, index - 1);
-                              Navigator.pop(context);
-                            },
-                      icon: const Icon(Icons.arrow_back_rounded),
-                      label: const Text('Move left'),
-                    ),
-                  ),
-                  const SizedBox(width: 10),
-                  Expanded(
-                    child: OutlinedButton.icon(
-                      onPressed: index == controller.wallpapers.length - 1
-                          ? null
-                          : () {
-                              controller.move(index, index + 1);
-                              Navigator.pop(context);
-                            },
-                      icon: const Icon(Icons.arrow_forward_rounded),
-                      label: const Text('Move right'),
-                    ),
-                  ),
-                ],
-              ),
-              const SizedBox(height: 10),
-              OutlinedButton.icon(
-                onPressed: () {
-                  controller.removeAt(index);
-                  Navigator.pop(context);
-                },
-                icon: const Icon(Icons.delete_outline_rounded),
-                label: const Text('Remove wallpaper'),
-                style: OutlinedButton.styleFrom(
-                  foregroundColor: WakeWallColors.danger,
-                ),
-              ),
-            ],
-          ),
+class _WallpaperTile extends StatelessWidget {
+  const _WallpaperTile({
+    required this.wallpaper,
+    required this.selected,
+    required this.width,
+    required this.height,
+  });
+
+  final Wallpaper wallpaper;
+  final bool selected;
+  final double width;
+  final double height;
+
+  @override
+  Widget build(BuildContext context) {
+    return AnimatedContainer(
+      key: ValueKey('wallpaper-thumbnail-${wallpaper.id}'),
+      duration: const Duration(milliseconds: 220),
+      width: width,
+      height: height,
+      padding: const EdgeInsets.all(2.5),
+      decoration: BoxDecoration(
+        color: selected
+            ? WakeWallColors.tealStrong.withValues(alpha: .12)
+            : Colors.transparent,
+        borderRadius: BorderRadius.circular(13),
+        border: Border.all(
+          color: selected ? WakeWallColors.tealStrong : Colors.transparent,
+          width: 1,
         ),
+      ),
+      child: AbstractWallpaper(
+        wallpaper: wallpaper,
+        borderRadius: BorderRadius.circular(10.5),
       ),
     );
   }
@@ -500,22 +608,13 @@ class _SettingsSheet extends StatelessWidget {
               _SegmentedSetting(
                 label: 'Order',
                 icon: Icons.shuffle_rounded,
-                options: const ['Sequential', 'Shuffle'],
-                selectedIndex: controller.order == RotationOrder.sequential
+                options: const ['Shuffle', 'Sequential'],
+                selectedIndex: controller.order == RotationOrder.shuffle
                     ? 0
                     : 1,
                 onSelected: (index) => controller.setOrder(
-                  index == 0 ? RotationOrder.sequential : RotationOrder.shuffle,
+                  index == 0 ? RotationOrder.shuffle : RotationOrder.sequential,
                 ),
-              ),
-              const SizedBox(height: 10),
-              _SettingTile(
-                label: 'Fit mode',
-                value: controller.fit == WallpaperFit.cropToFill
-                    ? 'Crop to Fill'
-                    : 'Fit Entire Image',
-                icon: Icons.fit_screen_outlined,
-                onTap: () => _showFitPicker(context),
               ),
               const SizedBox(height: 10),
               _SwitchTile(
@@ -528,7 +627,7 @@ class _SettingsSheet extends StatelessWidget {
               FilledButton.icon(
                 onPressed: controller.openWallpaperPicker,
                 icon: const Icon(Icons.wallpaper_rounded),
-                label: const Text('Make WakeWall Active'),
+                label: const Text('Use WakeWall'),
               ),
               const SizedBox(height: 10),
               OutlinedButton.icon(
@@ -540,43 +639,6 @@ class _SettingsSheet extends StatelessWidget {
           ),
         );
       },
-    );
-  }
-
-  Future<void> _showFitPicker(BuildContext context) {
-    return showModalBottomSheet<void>(
-      context: context,
-      builder: (context) => SafeArea(
-        child: Padding(
-          padding: const EdgeInsets.fromLTRB(20, 0, 20, 20),
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            crossAxisAlignment: CrossAxisAlignment.stretch,
-            children: [
-              Text('Fit mode', style: Theme.of(context).textTheme.titleLarge),
-              const SizedBox(height: 14),
-              _ChoiceTile(
-                label: 'Crop to Fill',
-                description: 'Fills the screen and crops the edges',
-                selected: controller.fit == WallpaperFit.cropToFill,
-                onTap: () {
-                  controller.setFit(WallpaperFit.cropToFill);
-                  Navigator.pop(context);
-                },
-              ),
-              _ChoiceTile(
-                label: 'Fit Entire Image',
-                description: 'Shows the full image inside the screen',
-                selected: controller.fit == WallpaperFit.fitEntireImage,
-                onTap: () {
-                  controller.setFit(WallpaperFit.fitEntireImage);
-                  Navigator.pop(context);
-                },
-              ),
-            ],
-          ),
-        ),
-      ),
     );
   }
 
@@ -662,61 +724,6 @@ class _SegmentedSetting extends StatelessWidget {
   }
 }
 
-class _SettingTile extends StatelessWidget {
-  const _SettingTile({
-    required this.label,
-    required this.value,
-    required this.icon,
-    required this.onTap,
-  });
-
-  final String label;
-  final String value;
-  final IconData icon;
-  final VoidCallback onTap;
-
-  @override
-  Widget build(BuildContext context) {
-    return Material(
-      color: WakeWallColors.background,
-      borderRadius: BorderRadius.circular(10),
-      child: InkWell(
-        onTap: onTap,
-        borderRadius: BorderRadius.circular(10),
-        child: Padding(
-          padding: const EdgeInsets.all(14),
-          child: Row(
-            children: [
-              Icon(icon, size: 20, color: WakeWallColors.muted),
-              const SizedBox(width: 12),
-              Expanded(
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Text(
-                      label.toUpperCase(),
-                      style: Theme.of(context).textTheme.labelSmall?.copyWith(
-                        color: WakeWallColors.muted,
-                        letterSpacing: 1,
-                      ),
-                    ),
-                    const SizedBox(height: 3),
-                    Text(value, style: Theme.of(context).textTheme.bodyLarge),
-                  ],
-                ),
-              ),
-              const Icon(
-                Icons.keyboard_arrow_down_rounded,
-                color: WakeWallColors.muted,
-              ),
-            ],
-          ),
-        ),
-      ),
-    );
-  }
-}
-
 class _SwitchTile extends StatelessWidget {
   const _SwitchTile({
     required this.label,
@@ -757,34 +764,6 @@ class _SwitchTile extends StatelessWidget {
           ),
           Switch(value: value, onChanged: onChanged),
         ],
-      ),
-    );
-  }
-}
-
-class _ChoiceTile extends StatelessWidget {
-  const _ChoiceTile({
-    required this.label,
-    required this.description,
-    required this.selected,
-    required this.onTap,
-  });
-
-  final String label;
-  final String description;
-  final bool selected;
-  final VoidCallback onTap;
-
-  @override
-  Widget build(BuildContext context) {
-    return ListTile(
-      onTap: onTap,
-      contentPadding: EdgeInsets.zero,
-      title: Text(label),
-      subtitle: Text(description),
-      trailing: Icon(
-        selected ? Icons.radio_button_checked : Icons.radio_button_off,
-        color: selected ? WakeWallColors.teal : WakeWallColors.muted,
       ),
     );
   }

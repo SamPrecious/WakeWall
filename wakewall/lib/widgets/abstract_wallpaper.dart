@@ -1,4 +1,5 @@
 import 'dart:math' as math;
+import 'dart:typed_data';
 
 import 'package:flutter/material.dart';
 
@@ -9,12 +10,14 @@ class AbstractWallpaper extends StatelessWidget {
     required this.wallpaper,
     this.borderRadius = BorderRadius.zero,
     this.crop,
+    this.previewBytes,
     super.key,
   });
 
   final Wallpaper wallpaper;
   final BorderRadius borderRadius;
   final WallpaperCrop? crop;
+  final Uint8List? previewBytes;
 
   @override
   Widget build(BuildContext context) {
@@ -23,6 +26,57 @@ class AbstractWallpaper extends StatelessWidget {
       child: LayoutBuilder(
         builder: (context, constraints) {
           final activeCrop = crop ?? wallpaper.crop;
+          final imageBytes = previewBytes ?? wallpaper.thumbnail;
+          final useFullSource =
+              imageBytes != null &&
+              wallpaper.imageWidth != null &&
+              wallpaper.imageHeight != null;
+          if (imageBytes != null && useFullSource) {
+            final sourceWidth = wallpaper.imageWidth!.toDouble();
+            final sourceHeight = wallpaper.imageHeight!.toDouble();
+            final coverScale = math.max(
+              constraints.maxWidth / sourceWidth,
+              constraints.maxHeight / sourceHeight,
+            );
+            final drawnWidth = sourceWidth * coverScale;
+            final drawnHeight = sourceHeight * coverScale;
+            final maxOffsetX = math.max(
+              0.0,
+              (drawnWidth * activeCrop.scale - constraints.maxWidth) /
+                  (2 * constraints.maxWidth),
+            );
+            final maxOffsetY = math.max(
+              0.0,
+              (drawnHeight * activeCrop.scale - constraints.maxHeight) /
+                  (2 * constraints.maxHeight),
+            );
+            final offsetX = activeCrop.offsetX.clamp(-maxOffsetX, maxOffsetX);
+            final offsetY = activeCrop.offsetY.clamp(-maxOffsetY, maxOffsetY);
+            return OverflowBox(
+              alignment: Alignment.center,
+              maxWidth: double.infinity,
+              maxHeight: double.infinity,
+              child: Transform.translate(
+                offset: Offset(
+                  constraints.maxWidth * offsetX,
+                  constraints.maxHeight * offsetY,
+                ),
+                child: Transform.scale(
+                  scale: activeCrop.scale,
+                  child: SizedBox(
+                    width: drawnWidth,
+                    height: drawnHeight,
+                    child: Image.memory(
+                      imageBytes,
+                      fit: BoxFit.fill,
+                      gaplessPlayback: true,
+                      filterQuality: FilterQuality.high,
+                    ),
+                  ),
+                ),
+              ),
+            );
+          }
           return Transform.translate(
             offset: Offset(
               constraints.maxWidth * activeCrop.offsetX,
@@ -30,13 +84,14 @@ class AbstractWallpaper extends StatelessWidget {
             ),
             child: Transform.scale(
               scale: activeCrop.scale,
-              child: wallpaper.thumbnail != null
+              child: imageBytes != null
                   ? Image.memory(
-                      wallpaper.thumbnail!,
+                      imageBytes,
                       width: constraints.maxWidth,
                       height: constraints.maxHeight,
                       fit: BoxFit.cover,
                       gaplessPlayback: true,
+                      filterQuality: FilterQuality.high,
                     )
                   : wallpaper.isUserImage
                   ? const ColoredBox(
