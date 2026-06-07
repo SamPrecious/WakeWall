@@ -6,7 +6,7 @@ when the screen turns off, so it is ready for the next wake.
 ## Features
 
 - Multi-photo import through Android Photos or file providers
-- Sequential and shuffle rotation modes
+- In-order and shuffle rotation modes
 - Screen-proportional preview and crop editor
 - Drag-to-reorder and drag-to-remove wallpaper collection
 - Pause and manual-next controls

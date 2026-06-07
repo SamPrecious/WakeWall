@@ -18,9 +18,13 @@ import android.graphics.Shader
 import android.os.Build
 import android.os.Handler
 import android.os.Looper
+import android.os.PowerManager
 import android.service.wallpaper.WallpaperService
+import android.view.Display
 import android.view.SurfaceHolder
+import android.hardware.display.DisplayManager
 import androidx.core.content.ContextCompat
+import java.util.concurrent.Executors
 import kotlin.math.max
 import kotlin.math.min
 
@@ -30,29 +34,43 @@ class WakeWallService : WallpaperService() {
     inner class WakeWallEngine : Engine() {
         private val handler = Handler(Looper.getMainLooper())
         private val store = WakeWallStore(this@WakeWallService)
+        private val powerManager = getSystemService(PowerManager::class.java)
+        private val displayManager = getSystemService(DisplayManager::class.java)
+        private val preparationExecutor = Executors.newSingleThreadExecutor()
         private var visible = false
+        private var destroyed = false
         private var screenOffHandled = false
         private var currentIndex = store.index
-        private var preparedIndex = currentIndex
+        private var currentFrameIndex = -1
+        private var currentFrameBitmap: Bitmap? = null
+        private var preparedIndex = -1
         private var preparedBitmap: Bitmap? = null
+        private var preparationGeneration = 0
+        private var preparingIndex = -1
+        private var rebuildScheduled = false
 
-        private val rebuildRunner = Runnable { redrawCurrentAndPrepare() }
+        private val rebuildRunner = Runnable {
+            rebuildScheduled = false
+            redrawCurrentAndPrepare()
+        }
 
         private val screenReceiver = object : BroadcastReceiver() {
             override fun onReceive(context: Context?, intent: Intent?) {
                 when (intent?.action) {
                     Intent.ACTION_SCREEN_OFF -> handleScreenOff()
                     Intent.ACTION_SCREEN_ON -> {
+                        restoreCurrentFrame()
                         screenOffHandled = false
                         store.recordEvent("screen_on")
+                        if (visible) scheduleRebuild()
                     }
                     ACTION_CONFIGURATION_UPDATED -> {
                         currentIndex = store.index
-                        invalidatePreparedFrame()
+                        invalidateFrames()
                         scheduleRebuild()
                     }
                     ACTION_CROP_UPDATED -> {
-                        invalidatePreparedFrame()
+                        invalidateFrames()
                         scheduleRebuild()
                     }
                 }
@@ -76,15 +94,34 @@ class WakeWallService : WallpaperService() {
         }
 
         override fun onDestroy() {
+            destroyed = true
+            preparationGeneration += 1
+            preparationExecutor.shutdownNow()
             handler.removeCallbacks(rebuildRunner)
-            invalidatePreparedFrame()
+            rebuildScheduled = false
+            invalidateFrames()
             runCatching { unregisterReceiver(screenReceiver) }
             super.onDestroy()
         }
 
         override fun onVisibilityChanged(isVisible: Boolean) {
             visible = isVisible
-            if (isVisible) scheduleRebuild() else handler.removeCallbacks(rebuildRunner)
+            if (!isVisible && deviceIsTurningOff()) {
+                handleScreenOff()
+            } else if (isVisible || preparedBitmap == null) {
+                scheduleRebuild()
+            }
+        }
+
+        // Detects a real display-off transition without rotating when another app covers the wallpaper.
+        private fun deviceIsTurningOff(): Boolean {
+            val displayState = displayManager
+                .getDisplay(Display.DEFAULT_DISPLAY)
+                ?.state
+            return !powerManager.isInteractive ||
+                displayState == Display.STATE_OFF ||
+                displayState == Display.STATE_DOZE ||
+                displayState == Display.STATE_DOZE_SUSPEND
         }
 
         override fun onSurfaceChanged(
@@ -97,15 +134,17 @@ class WakeWallService : WallpaperService() {
             scheduleRebuild()
         }
 
-        // Collapses repeated lifecycle events into one redraw.
+        // Keeps the earliest rebuild queued so the next wallpaper is ready before screen-off.
         private fun scheduleRebuild() {
-            handler.removeCallbacks(rebuildRunner)
+            if (rebuildScheduled) return
+            rebuildScheduled = true
             handler.post(rebuildRunner)
         }
 
         override fun onSurfaceDestroyed(holder: SurfaceHolder) {
             visible = false
             handler.removeCallbacks(rebuildRunner)
+            rebuildScheduled = false
             super.onSurfaceDestroyed(holder)
         }
 
@@ -114,55 +153,144 @@ class WakeWallService : WallpaperService() {
             if (screenOffHandled) return
             screenOffHandled = true
             handler.removeCallbacks(rebuildRunner)
+            rebuildScheduled = false
 
-            val nextIndex = if (preparedIndex != currentIndex) {
-                preparedIndex
-            } else {
-                store.nextIndex(currentIndex)
+            val prepared = preparedBitmap?.takeIf {
+                preparedIndex >= 0 &&
+                    preparedIndex != currentIndex &&
+                    frameMatchesSurface(it)
             }
-            val prepared = preparedBitmap?.takeIf { preparedIndex == nextIndex && !it.isRecycled }
+            val nextIndex = if (prepared != null) preparedIndex else store.nextIndex(currentIndex)
+            val currentFrame = currentFrameBitmap?.takeIf {
+                currentFrameIndex == nextIndex && frameMatchesSurface(it)
+            }
             val drawSucceeded = postFrame(
                 index = nextIndex,
-                bitmap = prepared,
+                bitmap = prepared ?: currentFrame,
                 allowHidden = true,
             )
 
+            if (prepared != null) promotePreparedFrame(nextIndex)
             currentIndex = nextIndex
             store.commitScreenOff(
                 next = nextIndex,
                 drawSucceeded = drawSucceeded,
                 usedPreparedFrame = prepared != null,
             )
-
-            // Prepares the following wallpaper immediately for another quick cycle.
-            prepareNextFrame()
         }
 
-        // Refreshes the visible wallpaper and keeps the next one ready.
+        // Reposts the retained frame before Android reveals the wallpaper surface.
+        private fun restoreCurrentFrame() {
+            currentIndex = store.index
+            val currentFrame = currentFrameBitmap?.takeIf {
+                currentFrameIndex == currentIndex && frameMatchesSurface(it)
+            }
+            if (currentFrame != null) {
+                postFrame(
+                    index = currentIndex,
+                    bitmap = currentFrame,
+                    allowHidden = true,
+                )
+            }
+        }
+
+        // Refreshes the wallpaper and prepares the next image only while visible.
         private fun redrawCurrentAndPrepare() {
             currentIndex = store.index
+            val currentFrame = ensureCurrentFrame()
             postFrame(
                 index = currentIndex,
-                bitmap = null,
-                allowHidden = false,
+                bitmap = currentFrame,
+                allowHidden = screenOffHandled || deviceIsTurningOff(),
             )
-            prepareNextFrame()
+            if (visible) scheduleNextFramePreparation()
         }
 
-        // Reuses one bitmap buffer so preparing wallpapers creates less work.
-        private fun prepareNextFrame() {
+        // Prepares the following wallpaper away from Android's wallpaper event thread.
+        private fun scheduleNextFramePreparation() {
+            if (destroyed) return
             val frame = surfaceHolder.surfaceFrame
             if (frame.width() <= 0 || frame.height() <= 0) return
 
-            val nextIndex = store.nextIndex(currentIndex)
             val existing = preparedBitmap
-            if (preparedIndex == nextIndex &&
+            if (preparedIndex >= 0 &&
+                preparedIndex != currentIndex &&
                 existing != null &&
                 !existing.isRecycled &&
                 existing.width == frame.width() &&
                 existing.height == frame.height()
             ) {
                 return
+            }
+            if (preparingIndex >= 0) return
+
+            val nextIndex = store.nextIndex(currentIndex)
+            if (nextIndex == currentIndex) {
+                preparedIndex = -1
+                return
+            }
+            val width = frame.width()
+            val height = frame.height()
+            val reusable = existing?.takeIf {
+                !it.isRecycled &&
+                    it.width == width &&
+                    it.height == height
+            }
+            if (existing !== reusable) {
+                preparedBitmap?.takeUnless { it.isRecycled }?.recycle()
+            }
+            preparedBitmap = null
+            preparedIndex = -1
+
+            val sourceIndex = currentIndex
+            val generation = ++preparationGeneration
+            preparingIndex = nextIndex
+            preparationExecutor.execute {
+                val bitmap = reusable ?: runCatching {
+                    Bitmap.createBitmap(width, height, Bitmap.Config.ARGB_8888)
+                }.getOrNull()
+                val rendered = bitmap?.let {
+                    runCatching { drawWallpaper(Canvas(it), nextIndex) }.isSuccess
+                } == true
+                handler.post {
+                    val stillNeeded = !destroyed &&
+                        generation == preparationGeneration &&
+                        currentIndex == sourceIndex &&
+                        rendered
+                    if (stillNeeded) {
+                        preparedBitmap?.takeUnless { it.isRecycled }?.recycle()
+                        preparedBitmap = bitmap
+                        preparedIndex = nextIndex
+                    } else {
+                        bitmap?.takeUnless { it.isRecycled }?.recycle()
+                    }
+                    if (generation == preparationGeneration) preparingIndex = -1
+                }
+            }
+        }
+
+        // Keeps the newly selected wallpaper cached while reusing the previous buffer for next.
+        private fun promotePreparedFrame(index: Int) {
+            val previousCurrent = currentFrameBitmap
+            currentFrameBitmap = preparedBitmap
+            currentFrameIndex = index
+            preparedBitmap = previousCurrent
+            preparedIndex = -1
+        }
+
+        // Renders the current wallpaper once so wake and surface recreation only copy pixels.
+        private fun ensureCurrentFrame(): Bitmap? {
+            val frame = surfaceHolder.surfaceFrame
+            if (frame.width() <= 0 || frame.height() <= 0) return null
+
+            val existing = currentFrameBitmap
+            if (currentFrameIndex == currentIndex &&
+                existing != null &&
+                !existing.isRecycled &&
+                existing.width == frame.width() &&
+                existing.height == frame.height()
+            ) {
+                return existing
             }
 
             val bitmap = existing
@@ -174,17 +302,34 @@ class WakeWallService : WallpaperService() {
                 ?: runCatching {
                     Bitmap.createBitmap(frame.width(), frame.height(), Bitmap.Config.ARGB_8888)
                 }.getOrNull()
-                ?: return
-            drawWallpaper(Canvas(bitmap), nextIndex)
-            if (bitmap !== existing) invalidatePreparedFrame()
-            preparedBitmap = bitmap
-            preparedIndex = nextIndex
+                ?: return null
+            drawWallpaper(Canvas(bitmap), currentIndex)
+            if (bitmap !== existing) {
+                currentFrameBitmap?.takeUnless { it.isRecycled }?.recycle()
+            }
+            currentFrameBitmap = bitmap
+            currentFrameIndex = currentIndex
+            return bitmap
         }
 
-        private fun invalidatePreparedFrame() {
+        private fun invalidateFrames() {
+            preparationGeneration += 1
+            preparingIndex = -1
+            currentFrameBitmap?.takeUnless { it.isRecycled }?.recycle()
+            currentFrameBitmap = null
+            currentFrameIndex = -1
             preparedBitmap?.takeUnless { it.isRecycled }?.recycle()
             preparedBitmap = null
-            preparedIndex = currentIndex
+            preparedIndex = -1
+        }
+
+        private fun frameMatchesSurface(bitmap: Bitmap): Boolean {
+            val frame = surfaceHolder.surfaceFrame
+            return !bitmap.isRecycled &&
+                frame.width() > 0 &&
+                frame.height() > 0 &&
+                bitmap.width == frame.width() &&
+                bitmap.height == frame.height()
         }
 
         // Draws a frame to Android's wallpaper surface, including while hidden.
@@ -197,7 +342,7 @@ class WakeWallService : WallpaperService() {
             var canvas: Canvas? = null
             var drewFrame = false
             try {
-                canvas = surfaceHolder.lockCanvas()
+                canvas = lockSurfaceCanvas(useHardware = bitmap != null)
                 if (canvas != null) {
                     if (bitmap != null) {
                         canvas.drawBitmap(bitmap, 0f, 0f, null)
@@ -214,6 +359,16 @@ class WakeWallService : WallpaperService() {
                 }.isSuccess
                 return drewFrame && posted
             }
+        }
+
+        // Copies complete cached frames with the GPU when available.
+        private fun lockSurfaceCanvas(useHardware: Boolean): Canvas? {
+            if (useHardware && Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+                runCatching { surfaceHolder.lockHardwareCanvas() }
+                    .getOrNull()
+                    ?.let { return it }
+            }
+            return surfaceHolder.lockCanvas()
         }
 
         // Draws either a selected photo or one of the bundled samples.

@@ -140,6 +140,7 @@ class _HomeScreenState extends State<HomeScreen> {
   }
 
   Future<void> _addImages() async {
+    final wasEmpty = !controller.hasWallpapers;
     var source = controller.photoSource;
     if (source == PhotoSource.askEveryTime) {
       final choice = await showModalBottomSheet<_AddSourceChoice>(
@@ -171,30 +172,67 @@ class _HomeScreenState extends State<HomeScreen> {
       if (mounted && importingImages) setState(() => importingImages = false);
     }
 
-    if (!mounted || controller.lastNativeError == null) return;
-    ScaffoldMessenger.of(context)
-      ..hideCurrentSnackBar()
-      ..showSnackBar(
-        SnackBar(
-          duration: const Duration(seconds: 5),
-          content: Row(
-            children: [
-              const Icon(
-                Icons.error_outline_rounded,
-                color: WakeWallColors.danger,
-                size: 21,
-              ),
-              const SizedBox(width: 12),
-              Expanded(child: Text(controller.lastNativeError!)),
-            ],
+    if (!mounted) return;
+    if (controller.lastNativeError != null) {
+      ScaffoldMessenger.of(context)
+        ..hideCurrentSnackBar()
+        ..showSnackBar(
+          SnackBar(
+            duration: const Duration(seconds: 5),
+            content: Row(
+              children: [
+                const Icon(
+                  Icons.error_outline_rounded,
+                  color: WakeWallColors.danger,
+                  size: 21,
+                ),
+                const SizedBox(width: 12),
+                Expanded(child: Text(controller.lastNativeError!)),
+              ],
+            ),
+            action: SnackBarAction(
+              label: 'Dismiss',
+              textColor: WakeWallColors.tealStrong,
+              onPressed: () {},
+            ),
           ),
-          action: SnackBarAction(
-            label: 'Dismiss',
-            textColor: WakeWallColors.tealStrong,
-            onPressed: () {},
-          ),
+        );
+    }
+    if (wasEmpty && controller.hasWallpapers) {
+      await _offerWallpaperSetupIfNeeded(context, controller);
+    }
+  }
+}
+
+// Offers Android's setup screen once the user has wallpapers ready to use.
+Future<void> _offerWallpaperSetupIfNeeded(
+  BuildContext context,
+  WakeWallController controller,
+) async {
+  if (!await controller.claimWallpaperSetupOffer() || !context.mounted) return;
+  final openSetup = await showDialog<bool>(
+    context: context,
+    builder: (context) => AlertDialog(
+      backgroundColor: WakeWallColors.surface,
+      icon: const Icon(Icons.wallpaper_rounded),
+      title: const Text('Set up WakeWall?'),
+      content: const Text(
+        'Your wallpapers are ready. Set WakeWall as your live wallpaper to rotate them automatically.',
+      ),
+      actions: [
+        TextButton(
+          onPressed: () => Navigator.pop(context, false),
+          child: const Text('Not now'),
         ),
-      );
+        FilledButton(
+          onPressed: () => Navigator.pop(context, true),
+          child: const Text('Set wallpaper'),
+        ),
+      ],
+    ),
+  );
+  if (openSetup == true && context.mounted) {
+    await controller.openWallpaperPicker();
   }
 }
 
@@ -739,7 +777,7 @@ class _SettingsSheetState extends State<_SettingsSheet> {
                   _SegmentedSetting(
                     label: 'Order',
                     icon: Icons.shuffle_rounded,
-                    options: const ['Shuffle', 'Sequential'],
+                    options: const ['Shuffle', 'In order'],
                     selectedIndex: controller.order == RotationOrder.shuffle
                         ? 0
                         : 1,
@@ -862,27 +900,34 @@ class _SettingsSheetState extends State<_SettingsSheet> {
     }
     if (!mounted) return;
     final text = controller.lastNativeError ?? message;
-    if (text == null) return;
-    ScaffoldMessenger.of(context)
-      ..hideCurrentSnackBar()
-      ..showSnackBar(
-        SnackBar(
-          content: Row(
-            children: [
-              Icon(
-                controller.lastNativeError == null
-                    ? Icons.check_circle_outline_rounded
-                    : Icons.error_outline_rounded,
-                color: controller.lastNativeError == null
-                    ? WakeWallColors.tealStrong
-                    : WakeWallColors.danger,
-              ),
-              const SizedBox(width: 12),
-              Expanded(child: Text(text)),
-            ],
+    if (text != null) {
+      ScaffoldMessenger.of(context)
+        ..hideCurrentSnackBar()
+        ..showSnackBar(
+          SnackBar(
+            content: Row(
+              children: [
+                Icon(
+                  controller.lastNativeError == null
+                      ? Icons.check_circle_outline_rounded
+                      : Icons.error_outline_rounded,
+                  color: controller.lastNativeError == null
+                      ? WakeWallColors.tealStrong
+                      : WakeWallColors.danger,
+                ),
+                const SizedBox(width: 12),
+                Expanded(child: Text(text)),
+              ],
+            ),
           ),
-        ),
-      );
+        );
+    }
+    if (restore &&
+        message != null &&
+        controller.lastNativeError == null &&
+        controller.hasWallpapers) {
+      await _offerWallpaperSetupIfNeeded(context, controller);
+    }
   }
 
   @override

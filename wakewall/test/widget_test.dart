@@ -94,6 +94,24 @@ void main() {
     expect(find.byKey(const ValueKey('import-loading-overlay')), findsNothing);
   });
 
+  testWidgets('first successful import offers wallpaper setup', (tester) async {
+    final bridge = _SetupPromptBridge();
+    final controller = WakeWallController(bridge: bridge);
+    await tester.pumpWidget(WakeWallApp(controller: controller));
+    await tester.pumpAndSettle();
+
+    await tester.tap(find.text('Add Wallpapers'));
+    await tester.pumpAndSettle();
+
+    expect(find.text('Set up WakeWall?'), findsOneWidget);
+    expect(find.text('Not now'), findsOneWidget);
+    expect(find.text('Set wallpaper'), findsOneWidget);
+
+    await tester.tap(find.text('Set wallpaper'));
+    await tester.pumpAndSettle();
+    expect(bridge.openedWallpaperPicker, isTrue);
+  });
+
   testWidgets('settings keeps the simple shuffle-first controls', (
     tester,
   ) async {
@@ -105,7 +123,7 @@ void main() {
     await tester.pumpAndSettle();
 
     expect(find.text('Shuffle'), findsOneWidget);
-    expect(find.text('Sequential'), findsOneWidget);
+    expect(find.text('In order'), findsOneWidget);
     expect(find.text('Photo source'), findsOneWidget);
     expect(find.text('Ask'), findsOneWidget);
     expect(find.text('Files'), findsOneWidget);
@@ -416,6 +434,35 @@ class _QuickImportBridge extends _EmptyBridge {
 class _CancelledImportBridge extends _QuickImportBridge {
   @override
   Future<Map<String, Object?>> pickImages() async => {'cancelled': true};
+}
+
+class _SetupPromptBridge extends _EmptyBridge {
+  bool openedWallpaperPicker = false;
+  final List<Map<String, Object?>> wallpapers = [];
+
+  @override
+  Future<Map<String, Object?>> configuration() async => {
+    ...await super.configuration(),
+    'photoSource': 'photos',
+    'wallpapers': wallpapers,
+  };
+
+  @override
+  Future<Map<String, Object?>> pickImages() async {
+    wallpapers.add({
+      'sampleIndex': 0,
+      'crop': const {'scale': 1.0, 'offsetX': 0.0, 'offsetY': 0.0},
+    });
+    return configuration();
+  }
+
+  @override
+  Future<bool> claimWallpaperSetupOffer() async => true;
+
+  @override
+  Future<void> openWallpaperPicker() async {
+    openedWallpaperPicker = true;
+  }
 }
 
 class _DelayedBackupBridge extends _EmptyBridge {

@@ -71,6 +71,15 @@ class MainActivity : FlutterFragmentActivity() {
                         result.success(null)
                     }
 
+                    "claimWallpaperSetupOffer" -> {
+                        val store = WakeWallStore(this)
+                        val shouldOffer = store.wallpaperCount > 0 &&
+                            !store.wallpaperSetupOffered &&
+                            !isWakeWallActive()
+                        if (shouldOffer) store.wallpaperSetupOffered = true
+                        result.success(shouldOffer)
+                    }
+
                     "showNext" -> {
                         val store = WakeWallStore(this)
                         val next = store.advance("manual")
@@ -289,6 +298,12 @@ class MainActivity : FlutterFragmentActivity() {
         } catch (_: Exception) {
             startActivity(Intent(WallpaperManager.ACTION_LIVE_WALLPAPER_CHOOSER))
         }
+    }
+
+    // Checks whether Android is currently using WakeWall as its live wallpaper.
+    private fun isWakeWallActive(): Boolean {
+        val expected = ComponentName(this, WakeWallService::class.java)
+        return WallpaperManager.getInstance(this).wallpaperInfo?.component == expected
     }
 
     companion object {

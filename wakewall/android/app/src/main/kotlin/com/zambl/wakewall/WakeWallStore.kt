@@ -51,6 +51,10 @@ class WakeWallStore(context: Context) {
         get() = prefs.getString("photo_source", "askEveryTime") ?: "askEveryTime"
         set(value) = prefs.edit().putString("photo_source", value).apply()
 
+    var wallpaperSetupOffered: Boolean
+        get() = prefs.getBoolean("wallpaper_setup_offered", false)
+        set(value) = prefs.edit().putBoolean("wallpaper_setup_offered", value).apply()
+
     val wallpapers: List<String>
         get() {
             val saved = prefs.getString("wallpapers", null)

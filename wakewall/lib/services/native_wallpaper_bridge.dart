@@ -30,6 +30,11 @@ class NativeWallpaperBridge {
     await _channel.invokeMethod<void>('openWallpaperPicker');
   }
 
+  Future<bool> claimWallpaperSetupOffer() async {
+    return await _channel.invokeMethod<bool>('claimWallpaperSetupOffer') ??
+        false;
+  }
+
   Future<int?> showNext() async {
     return _channel.invokeMethod<int>('showNext');
   }

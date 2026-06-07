@@ -229,6 +229,16 @@ class WakeWallController extends ChangeNotifier {
 
   Future<void> openWallpaperPicker() => _runNative(_bridge.openWallpaperPicker);
 
+  Future<bool> claimWallpaperSetupOffer() async {
+    try {
+      return await _bridge.claimWallpaperSetupOffer();
+    } on MissingPluginException {
+      return false;
+    } on PlatformException {
+      return false;
+    }
+  }
+
   Future<void> _syncSettings() {
     return _runNative(
       () => _bridge.updateSettings(
