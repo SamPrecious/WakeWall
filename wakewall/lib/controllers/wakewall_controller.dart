@@ -104,12 +104,15 @@ class WakeWallController extends ChangeNotifier {
     });
   }
 
-  Future<void> addImages() async {
-    await _importImages(_bridge.pickImages);
+  Future<void> addImages({VoidCallback? onImportStarted}) async {
+    await _importImages(_bridge.pickImages, onImportStarted: onImportStarted);
   }
 
-  Future<void> addImagesFromFiles() async {
-    await _importImages(_bridge.pickImagesFromFiles);
+  Future<void> addImagesFromFiles({VoidCallback? onImportStarted}) async {
+    await _importImages(
+      _bridge.pickImagesFromFiles,
+      onImportStarted: onImportStarted,
+    );
   }
 
   Future<void> setPhotoSource(PhotoSource value) async {
@@ -118,53 +121,66 @@ class WakeWallController extends ChangeNotifier {
     await _runNative(() => _bridge.updatePhotoSource(value.name));
   }
 
-  Future<String?> backup() => _runFileAction(_bridge.backup);
+  Future<String?> backup({VoidCallback? onOperationStarted}) =>
+      _runFileAction(_bridge.backup, onOperationStarted: onOperationStarted);
 
-  Future<String?> restore() async {
-    final message = await _runFileAction(_bridge.restore, applyResult: true);
+  Future<String?> restore({VoidCallback? onOperationStarted}) async {
+    final message = await _runFileAction(
+      _bridge.restore,
+      applyResult: true,
+      onOperationStarted: onOperationStarted,
+    );
     notifyListeners();
     return message;
   }
 
   Future<void> _importImages(
-    Future<Map<String, Object?>> Function() picker,
-  ) async {
-    await _runNative(() async {
-      final configuration = await picker();
-      _applyImportResult(configuration);
-      final failedImages =
-          configuration['failedImages'] as List<Object?>? ?? const [];
-      final failedWithoutBytes =
-          (configuration['failedWithoutBytesCount'] as num?)?.toInt() ?? 0;
-      final normalized = await Future.wait(
-        failedImages.map((value) {
-          final data = Map<Object?, Object?>.from(value! as Map);
-          return compute(_normalizeFailedImage, {
-            'name': data['name'] as String? ?? 'Photo',
-            'bytes': data['bytes'] as Uint8List,
-          });
-        }),
-      );
-      final recovered = normalized.whereType<Map<String, Object?>>().toList();
-      var storedRecovered = 0;
-      if (recovered.isNotEmpty) {
-        final recoveredConfiguration = await _bridge.importNormalizedImages(
-          recovered,
+    Future<Map<String, Object?>> Function() picker, {
+    VoidCallback? onImportStarted,
+  }) async {
+    _bridge.setImageImportStartedListener(onImportStarted);
+    try {
+      await _runNative(() async {
+        final configuration = await picker();
+        if (configuration['cancelled'] == true) return;
+        _applyImportResult(configuration);
+        final failedImages =
+            configuration['failedImages'] as List<Object?>? ?? const [];
+        final failedWithoutBytes =
+            (configuration['failedWithoutBytesCount'] as num?)?.toInt() ?? 0;
+        final normalized = await Future.wait(
+          failedImages.map((value) {
+            final data = Map<Object?, Object?>.from(value! as Map);
+            return compute(_normalizeFailedImage, {
+              'name': data['name'] as String? ?? 'Photo',
+              'bytes': data['bytes'] as Uint8List,
+            });
+          }),
         );
-        storedRecovered =
-            (recoveredConfiguration['normalizedImportedCount'] as num?)
-                ?.toInt() ??
-            0;
-        _applyImportResult(recoveredConfiguration);
-      }
-      final failed = failedWithoutBytes + failedImages.length - storedRecovered;
-      if (failed > 0) {
-        _lastNativeError = failed == 1
-            ? 'One photo could not be imported.'
-            : '$failed photos could not be imported.';
-      }
-      notifyListeners();
-    });
+        final recovered = normalized.whereType<Map<String, Object?>>().toList();
+        var storedRecovered = 0;
+        if (recovered.isNotEmpty) {
+          final recoveredConfiguration = await _bridge.importNormalizedImages(
+            recovered,
+          );
+          storedRecovered =
+              (recoveredConfiguration['normalizedImportedCount'] as num?)
+                  ?.toInt() ??
+              0;
+          _applyImportResult(recoveredConfiguration);
+        }
+        final failed =
+            failedWithoutBytes + failedImages.length - storedRecovered;
+        if (failed > 0) {
+          _lastNativeError = failed == 1
+              ? 'One photo could not be imported.'
+              : '$failed photos could not be imported.';
+        }
+        notifyListeners();
+      });
+    } finally {
+      _bridge.setImageImportStartedListener(null);
+    }
   }
 
   Future<void> removeAt(int index) async {
@@ -236,7 +252,9 @@ class WakeWallController extends ChangeNotifier {
   Future<String?> _runFileAction(
     Future<Map<String, Object?>> Function() action, {
     bool applyResult = false,
+    VoidCallback? onOperationStarted,
   }) async {
+    _bridge.setFileOperationStartedListener(onOperationStarted);
     try {
       _lastNativeError = null;
       final result = await action();
@@ -249,6 +267,8 @@ class WakeWallController extends ChangeNotifier {
       _lastNativeError = error.message ?? error.code;
     } catch (_) {
       _lastNativeError = 'WakeWall could not complete that file operation.';
+    } finally {
+      _bridge.setFileOperationStartedListener(null);
     }
     return null;
   }

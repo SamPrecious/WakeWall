@@ -117,7 +117,12 @@ class _HomeScreenState extends State<HomeScreen> {
                   },
                 ),
               ),
-              if (importingImages) const _ImportOverlay(),
+              if (importingImages)
+                const _OperationOverlay(
+                  overlayKey: ValueKey('import-loading-overlay'),
+                  title: 'Adding wallpapers',
+                  description: 'Preparing your photos...',
+                ),
             ],
           ),
         );
@@ -148,17 +153,21 @@ class _HomeScreenState extends State<HomeScreen> {
       if (choice.remember) await controller.setPhotoSource(source);
     }
 
-    final overlayTimer = Timer(importOverlayDelay, () {
-      if (mounted) setState(() => importingImages = true);
-    });
+    Timer? overlayTimer;
+    void beginLoadingDelay() {
+      overlayTimer ??= Timer(importOverlayDelay, () {
+        if (mounted) setState(() => importingImages = true);
+      });
+    }
+
     try {
       if (source == PhotoSource.files) {
-        await controller.addImagesFromFiles();
+        await controller.addImagesFromFiles(onImportStarted: beginLoadingDelay);
       } else {
-        await controller.addImages();
+        await controller.addImages(onImportStarted: beginLoadingDelay);
       }
     } finally {
-      overlayTimer.cancel();
+      overlayTimer?.cancel();
       if (mounted) setState(() => importingImages = false);
     }
 
@@ -189,13 +198,21 @@ class _HomeScreenState extends State<HomeScreen> {
   }
 }
 
-class _ImportOverlay extends StatelessWidget {
-  const _ImportOverlay();
+class _OperationOverlay extends StatelessWidget {
+  const _OperationOverlay({
+    required this.overlayKey,
+    required this.title,
+    required this.description,
+  });
+
+  final Key overlayKey;
+  final String title;
+  final String description;
 
   @override
   Widget build(BuildContext context) {
     return Positioned.fill(
-      key: const ValueKey('import-loading-overlay'),
+      key: overlayKey,
       child: ColoredBox(
         color: Colors.black.withValues(alpha: .58),
         child: Center(
@@ -230,13 +247,13 @@ class _ImportOverlay extends StatelessWidget {
                 ),
                 const SizedBox(height: 20),
                 Text(
-                  'Adding wallpapers',
+                  title,
                   textAlign: TextAlign.center,
                   style: Theme.of(context).textTheme.titleMedium,
                 ),
                 const SizedBox(height: 6),
                 Text(
-                  'Preparing your photos...',
+                  description,
                   textAlign: TextAlign.center,
                   style: Theme.of(
                     context,
@@ -683,6 +700,9 @@ class _SettingsSheet extends StatefulWidget {
 
 class _SettingsSheetState extends State<_SettingsSheet> {
   bool handlingBackup = false;
+  bool showingFileProgress = false;
+  Timer? fileProgressTimer;
+  String fileProgressTitle = '';
 
   WakeWallController get controller => widget.controller;
 
@@ -691,84 +711,102 @@ class _SettingsSheetState extends State<_SettingsSheet> {
     return ListenableBuilder(
       listenable: controller,
       builder: (context, _) {
-        return SingleChildScrollView(
-          padding: const EdgeInsets.fromLTRB(22, 4, 22, 24),
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            crossAxisAlignment: CrossAxisAlignment.stretch,
-            children: [
-              Row(
+        return Stack(
+          children: [
+            SingleChildScrollView(
+              padding: const EdgeInsets.fromLTRB(22, 4, 22, 24),
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                crossAxisAlignment: CrossAxisAlignment.stretch,
                 children: [
-                  Text(
-                    'Settings',
-                    style: Theme.of(context).textTheme.titleLarge,
+                  Row(
+                    children: [
+                      Text(
+                        'Settings',
+                        style: Theme.of(context).textTheme.titleLarge,
+                      ),
+                      const Spacer(),
+                      IconButton(
+                        onPressed: () => Navigator.pop(context),
+                        icon: const Icon(
+                          Icons.close_rounded,
+                          color: Color(0xFFE3E3E8),
+                        ),
+                      ),
+                    ],
                   ),
-                  const Spacer(),
-                  IconButton(
-                    onPressed: () => Navigator.pop(context),
-                    icon: const Icon(
-                      Icons.close_rounded,
-                      color: Color(0xFFE3E3E8),
+                  const SizedBox(height: 18),
+                  _SegmentedSetting(
+                    label: 'Order',
+                    icon: Icons.shuffle_rounded,
+                    options: const ['Shuffle', 'Sequential'],
+                    selectedIndex: controller.order == RotationOrder.shuffle
+                        ? 0
+                        : 1,
+                    onSelected: (index) => controller.setOrder(
+                      index == 0
+                          ? RotationOrder.shuffle
+                          : RotationOrder.sequential,
                     ),
+                  ),
+                  const SizedBox(height: 10),
+                  _SegmentedSetting(
+                    label: 'Photo source',
+                    icon: Icons.add_photo_alternate_outlined,
+                    options: const ['Ask', 'Photos', 'Files'],
+                    selectedIndex: controller.photoSource.index,
+                    onSelected: (index) =>
+                        controller.setPhotoSource(PhotoSource.values[index]),
+                  ),
+                  const SizedBox(height: 10),
+                  _SwitchTile(
+                    label: 'Pause WakeWall',
+                    description: 'Keep the current wallpaper in place',
+                    value: controller.paused,
+                    onChanged: controller.setPaused,
+                  ),
+                  const SizedBox(height: 20),
+                  Row(
+                    children: [
+                      Expanded(
+                        child: OutlinedButton.icon(
+                          onPressed: handlingBackup
+                              ? null
+                              : () => _backup(false),
+                          icon: const Icon(Icons.save_alt_rounded),
+                          label: const Text('Backup'),
+                        ),
+                      ),
+                      const SizedBox(width: 10),
+                      Expanded(
+                        child: OutlinedButton.icon(
+                          onPressed: handlingBackup
+                              ? null
+                              : () => _backup(true),
+                          icon: const Icon(Icons.restore_rounded),
+                          label: const Text('Restore'),
+                        ),
+                      ),
+                    ],
+                  ),
+                  const SizedBox(height: 10),
+                  FilledButton.icon(
+                    onPressed: controller.openWallpaperPicker,
+                    icon: const Icon(Icons.wallpaper_rounded),
+                    label: const Text('Use WakeWall'),
                   ),
                 ],
               ),
-              const SizedBox(height: 18),
-              _SegmentedSetting(
-                label: 'Order',
-                icon: Icons.shuffle_rounded,
-                options: const ['Shuffle', 'Sequential'],
-                selectedIndex: controller.order == RotationOrder.shuffle
-                    ? 0
-                    : 1,
-                onSelected: (index) => controller.setOrder(
-                  index == 0 ? RotationOrder.shuffle : RotationOrder.sequential,
-                ),
+            ),
+            if (showingFileProgress)
+              _OperationOverlay(
+                overlayKey: const ValueKey('backup-loading-overlay'),
+                title: fileProgressTitle,
+                description: fileProgressTitle == 'Restoring backup'
+                    ? 'Recovering your wallpapers and settings...'
+                    : 'Saving your wallpapers and settings...',
               ),
-              const SizedBox(height: 10),
-              _SegmentedSetting(
-                label: 'Photo source',
-                icon: Icons.add_photo_alternate_outlined,
-                options: const ['Ask', 'Photos', 'Files'],
-                selectedIndex: controller.photoSource.index,
-                onSelected: (index) =>
-                    controller.setPhotoSource(PhotoSource.values[index]),
-              ),
-              const SizedBox(height: 10),
-              _SwitchTile(
-                label: 'Pause WakeWall',
-                description: 'Keep the current wallpaper in place',
-                value: controller.paused,
-                onChanged: controller.setPaused,
-              ),
-              const SizedBox(height: 20),
-              Row(
-                children: [
-                  Expanded(
-                    child: OutlinedButton.icon(
-                      onPressed: handlingBackup ? null : () => _backup(false),
-                      icon: const Icon(Icons.save_alt_rounded),
-                      label: const Text('Backup'),
-                    ),
-                  ),
-                  const SizedBox(width: 10),
-                  Expanded(
-                    child: OutlinedButton.icon(
-                      onPressed: handlingBackup ? null : () => _backup(true),
-                      icon: const Icon(Icons.restore_rounded),
-                      label: const Text('Restore'),
-                    ),
-                  ),
-                ],
-              ),
-              const SizedBox(height: 10),
-              FilledButton.icon(
-                onPressed: controller.openWallpaperPicker,
-                icon: const Icon(Icons.wallpaper_rounded),
-                label: const Text('Use WakeWall'),
-              ),
-            ],
-          ),
+          ],
         );
       },
     );
@@ -776,11 +814,23 @@ class _SettingsSheetState extends State<_SettingsSheet> {
 
   Future<void> _backup(bool restore) async {
     setState(() => handlingBackup = true);
+    fileProgressTitle = restore ? 'Restoring backup' : 'Creating backup';
+    void beginProgressDelay() {
+      fileProgressTimer ??= Timer(_HomeScreenState.importOverlayDelay, () {
+        if (mounted) setState(() => showingFileProgress = true);
+      });
+    }
+
     final message = restore
-        ? await controller.restore()
-        : await controller.backup();
+        ? await controller.restore(onOperationStarted: beginProgressDelay)
+        : await controller.backup(onOperationStarted: beginProgressDelay);
     if (!mounted) return;
-    setState(() => handlingBackup = false);
+    fileProgressTimer?.cancel();
+    fileProgressTimer = null;
+    setState(() {
+      handlingBackup = false;
+      showingFileProgress = false;
+    });
     final text = controller.lastNativeError ?? message;
     if (text == null) return;
     ScaffoldMessenger.of(context)
@@ -803,6 +853,12 @@ class _SettingsSheetState extends State<_SettingsSheet> {
           ),
         ),
       );
+  }
+
+  @override
+  void dispose() {
+    fileProgressTimer?.cancel();
+    super.dispose();
   }
 }
 

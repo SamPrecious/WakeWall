@@ -13,6 +13,7 @@ import java.util.concurrent.Executors
 
 class MainActivity : FlutterFragmentActivity() {
     private val channelName = "com.zambl.wakewall/control"
+    private lateinit var controlChannel: MethodChannel
     private var pendingImageResult: MethodChannel.Result? = null
     private var pendingBackupResult: MethodChannel.Result? = null
     private var pendingRestoreResult: MethodChannel.Result? = null
@@ -40,8 +41,8 @@ class MainActivity : FlutterFragmentActivity() {
     // Connects Flutter's controls to the Android wallpaper service.
     override fun configureFlutterEngine(flutterEngine: FlutterEngine) {
         super.configureFlutterEngine(flutterEngine)
-        MethodChannel(flutterEngine.dartExecutor.binaryMessenger, channelName)
-            .setMethodCallHandler { call, result ->
+        controlChannel = MethodChannel(flutterEngine.dartExecutor.binaryMessenger, channelName)
+        controlChannel.setMethodCallHandler { call, result ->
                 when (call.method) {
                     "pickImages" -> pickImages(result)
                     "pickImagesFromFiles" -> pickImagesFromFiles(result)
@@ -159,6 +160,11 @@ class MainActivity : FlutterFragmentActivity() {
         val result = pendingImageResult
         pendingImageResult = null
         if (result == null) return
+        if (uris.isEmpty()) {
+            result.success(mapOf("cancelled" to true))
+            return
+        }
+        controlChannel.invokeMethod("imageImportStarted", null)
         runInBackground(result) {
             val store = WakeWallStore(this)
             val summary = store.addImages(uris)
@@ -229,6 +235,7 @@ class MainActivity : FlutterFragmentActivity() {
             result.success(mapOf("cancelled" to true))
             return
         }
+        controlChannel.invokeMethod("fileOperationStarted", null)
         runInBackground(result) {
             contentResolver.openOutputStream(uri, "w")?.use { WakeWallStore(this).writeBackup(it) }
                 ?: error("WakeWall could not create the backup file.")
@@ -243,6 +250,7 @@ class MainActivity : FlutterFragmentActivity() {
             result.success(mapOf("cancelled" to true))
             return
         }
+        controlChannel.invokeMethod("fileOperationStarted", null)
         runInBackground(result) {
             val store = WakeWallStore(this)
             contentResolver.openInputStream(uri)?.use(store::restoreBackup)

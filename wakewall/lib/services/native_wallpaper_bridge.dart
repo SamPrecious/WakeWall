@@ -2,6 +2,34 @@ import 'package:flutter/services.dart';
 
 class NativeWallpaperBridge {
   static const _channel = MethodChannel('com.zambl.wakewall/control');
+  VoidCallback? _onImageImportStarted;
+  VoidCallback? _onFileOperationStarted;
+
+  void setImageImportStartedListener(VoidCallback? listener) {
+    _onImageImportStarted = listener;
+    if (listener == null) return;
+    _channel.setMethodCallHandler((call) async {
+      if (call.method == 'imageImportStarted') {
+        _onImageImportStarted?.call();
+      }
+      if (call.method == 'fileOperationStarted') {
+        _onFileOperationStarted?.call();
+      }
+    });
+  }
+
+  void setFileOperationStartedListener(VoidCallback? listener) {
+    _onFileOperationStarted = listener;
+    if (listener == null) return;
+    _channel.setMethodCallHandler((call) async {
+      if (call.method == 'imageImportStarted') {
+        _onImageImportStarted?.call();
+      }
+      if (call.method == 'fileOperationStarted') {
+        _onFileOperationStarted?.call();
+      }
+    });
+  }
 
   Future<void> openWallpaperPicker() async {
     await _channel.invokeMethod<void>('openWallpaperPicker');

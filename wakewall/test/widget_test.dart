@@ -48,7 +48,14 @@ void main() {
 
     expect(find.byKey(const ValueKey('import-loading-overlay')), findsNothing);
 
-    await tester.pump(const Duration(milliseconds: 350));
+    await tester.pump(const Duration(seconds: 2));
+    expect(find.byKey(const ValueKey('import-loading-overlay')), findsNothing);
+
+    bridge.selectImages();
+    await tester.pump(const Duration(milliseconds: 349));
+    expect(find.byKey(const ValueKey('import-loading-overlay')), findsNothing);
+
+    await tester.pump(const Duration(milliseconds: 1));
     expect(
       find.byKey(const ValueKey('import-loading-overlay')),
       findsOneWidget,
@@ -58,6 +65,19 @@ void main() {
 
     bridge.finishImport();
     await tester.pumpAndSettle();
+    expect(find.byKey(const ValueKey('import-loading-overlay')), findsNothing);
+  });
+
+  testWidgets('cancelling image selection never shows the loading overlay', (
+    tester,
+  ) async {
+    final controller = WakeWallController(bridge: _CancelledImportBridge());
+    await tester.pumpWidget(WakeWallApp(controller: controller));
+    await tester.pumpAndSettle();
+
+    await tester.tap(find.text('Add Wallpapers'));
+    await tester.pump(const Duration(seconds: 1));
+
     expect(find.byKey(const ValueKey('import-loading-overlay')), findsNothing);
   });
 
@@ -94,6 +114,42 @@ void main() {
     expect(find.text('Restore'), findsOneWidget);
     expect(find.text('Use WakeWall'), findsOneWidget);
     expect(find.text('Wake-event diagnostics'), findsNothing);
+  });
+
+  testWidgets('backup progress waits until a save location is confirmed', (
+    tester,
+  ) async {
+    final bridge = _DelayedBackupBridge();
+    final controller = WakeWallController(bridge: bridge);
+    await tester.pumpWidget(WakeWallApp(controller: controller));
+    await tester.pumpAndSettle();
+
+    await tester.tap(find.byTooltip('Settings'));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('Backup'));
+    await tester.pump(const Duration(seconds: 1));
+    expect(find.byKey(const ValueKey('backup-loading-overlay')), findsNothing);
+
+    bridge.confirmLocation();
+    await tester.pump(const Duration(milliseconds: 350));
+    expect(find.text('Creating backup'), findsOneWidget);
+
+    bridge.finishBackup();
+    await tester.pumpAndSettle();
+    expect(find.byKey(const ValueKey('backup-loading-overlay')), findsNothing);
+  });
+
+  testWidgets('cancelling backup never shows progress', (tester) async {
+    final controller = WakeWallController(bridge: _CancelledBackupBridge());
+    await tester.pumpWidget(WakeWallApp(controller: controller));
+    await tester.pumpAndSettle();
+
+    await tester.tap(find.byTooltip('Settings'));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('Backup'));
+    await tester.pump(const Duration(seconds: 1));
+
+    expect(find.byKey(const ValueKey('backup-loading-overlay')), findsNothing);
   });
 
   testWidgets('WakeWall renders the populated home screen', (tester) async {
@@ -278,6 +334,7 @@ class _PopulatedBridge extends _EmptyBridge {
 class _DelayedImportBridge extends _EmptyBridge {
   final Completer<Map<String, Object?>> importCompleter =
       Completer<Map<String, Object?>>();
+  VoidCallback? importStarted;
 
   @override
   Future<Map<String, Object?>> configuration() async => {
@@ -287,6 +344,15 @@ class _DelayedImportBridge extends _EmptyBridge {
 
   @override
   Future<Map<String, Object?>> pickImages() => importCompleter.future;
+
+  @override
+  void setImageImportStartedListener(VoidCallback? listener) {
+    importStarted = listener;
+  }
+
+  void selectImages() {
+    importStarted?.call();
+  }
 
   void finishImport() {
     importCompleter.complete({
@@ -301,6 +367,8 @@ class _DelayedImportBridge extends _EmptyBridge {
 }
 
 class _QuickImportBridge extends _EmptyBridge {
+  VoidCallback? importStarted;
+
   @override
   Future<Map<String, Object?>> configuration() async => {
     ...await super.configuration(),
@@ -308,5 +376,45 @@ class _QuickImportBridge extends _EmptyBridge {
   };
 
   @override
-  Future<Map<String, Object?>> pickImages() => configuration();
+  Future<Map<String, Object?>> pickImages() {
+    importStarted?.call();
+    return configuration();
+  }
+
+  @override
+  void setImageImportStartedListener(VoidCallback? listener) {
+    importStarted = listener;
+  }
+}
+
+class _CancelledImportBridge extends _QuickImportBridge {
+  @override
+  Future<Map<String, Object?>> pickImages() async => {'cancelled': true};
+}
+
+class _DelayedBackupBridge extends _EmptyBridge {
+  final Completer<Map<String, Object?>> backupCompleter =
+      Completer<Map<String, Object?>>();
+  VoidCallback? operationStarted;
+
+  @override
+  Future<Map<String, Object?>> backup() => backupCompleter.future;
+
+  @override
+  void setFileOperationStartedListener(VoidCallback? listener) {
+    operationStarted = listener;
+  }
+
+  void confirmLocation() {
+    operationStarted?.call();
+  }
+
+  void finishBackup() {
+    backupCompleter.complete({'message': 'Backup saved.'});
+  }
+}
+
+class _CancelledBackupBridge extends _DelayedBackupBridge {
+  @override
+  Future<Map<String, Object?>> backup() async => {'cancelled': true};
 }
