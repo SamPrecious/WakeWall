@@ -31,6 +31,13 @@ android {
             signingConfig = signingConfigs.getByName("debug")
         }
     }
+
+    lint {
+        // Flutter regenerates local.properties with Windows paths that Android Lint misreads.
+        disable += "PropertyEscape"
+        // Flutter still provides a v21 launch drawable even though WakeWall's minimum SDK is newer.
+        disable += "ObsoleteSdkInt"
+    }
 }
 
 kotlin {

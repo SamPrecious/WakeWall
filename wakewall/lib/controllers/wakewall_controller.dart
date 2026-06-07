@@ -229,16 +229,6 @@ class WakeWallController extends ChangeNotifier {
 
   Future<void> openWallpaperPicker() => _runNative(_bridge.openWallpaperPicker);
 
-  Future<Map<String, Object?>> diagnostics() async {
-    try {
-      return await _bridge.diagnostics();
-    } on MissingPluginException {
-      return {'status': 'Native controls are available on Android builds.'};
-    } on PlatformException catch (error) {
-      return {'status': error.message ?? error.code};
-    }
-  }
-
   Future<void> _syncSettings() {
     return _runNative(
       () => _bridge.updateSettings(
@@ -276,25 +266,39 @@ class WakeWallController extends ChangeNotifier {
   // Rebuilds the Flutter list from Android's saved wallpaper collection.
   void _applyConfiguration(Map<String, Object?> configuration) {
     _paused = configuration['paused'] as bool? ?? _paused;
-    _order = configuration['shuffle'] == true
-        ? RotationOrder.shuffle
-        : RotationOrder.sequential;
-    _fit = configuration['fit'] == WallpaperFit.fitEntireImage.name
-        ? WallpaperFit.fitEntireImage
-        : WallpaperFit.cropToFill;
-    _photoSource = PhotoSource.values.firstWhere(
-      (source) => source.name == configuration['photoSource'],
-      orElse: () => PhotoSource.askEveryTime,
-    );
+    if (configuration.containsKey('shuffle')) {
+      _order = configuration['shuffle'] == true
+          ? RotationOrder.shuffle
+          : RotationOrder.sequential;
+    }
+    final savedFit = configuration['fit'] as String?;
+    if (savedFit != null) {
+      _fit = savedFit == WallpaperFit.fitEntireImage.name
+          ? WallpaperFit.fitEntireImage
+          : WallpaperFit.cropToFill;
+    }
+    final savedSource = configuration['photoSource'] as String?;
+    if (savedSource != null) {
+      _photoSource = PhotoSource.values.firstWhere(
+        (source) => source.name == savedSource,
+        orElse: () => _photoSource,
+      );
+    }
 
     final savedWallpapers =
         configuration['wallpapers'] as List<Object?>? ?? const [];
     if (savedWallpapers.isNotEmpty || configuration.containsKey('wallpapers')) {
+      final restored = <Wallpaper>[];
+      for (final value in savedWallpapers) {
+        final wallpaper = _wallpaperFromNative(value);
+        if (wallpaper != null) restored.add(wallpaper);
+      }
       _wallpapers
         ..clear()
-        ..addAll(savedWallpapers.map(_wallpaperFromNative));
+        ..addAll(restored);
     }
-    final savedIndex = (configuration['index'] as num?)?.toInt() ?? 0;
+    final savedIndex =
+        (configuration['index'] as num?)?.toInt() ?? _selectedIndex;
     _selectedIndex = _wallpapers.isEmpty ? 0 : savedIndex % _wallpapers.length;
   }
 
@@ -304,29 +308,44 @@ class WakeWallController extends ChangeNotifier {
     if (configuration.containsKey('wallpapers')) return;
     final added =
         configuration['addedWallpapers'] as List<Object?>? ?? const [];
-    _wallpapers.addAll(added.map(_wallpaperFromNative));
+    for (final value in added) {
+      final wallpaper = _wallpaperFromNative(value);
+      if (wallpaper != null) _wallpapers.add(wallpaper);
+    }
   }
 
-  Wallpaper _wallpaperFromNative(Object? value) {
-    final data = Map<Object?, Object?>.from(value! as Map);
+  Wallpaper? _wallpaperFromNative(Object? value) {
+    if (value is! Map) return null;
+    final data = Map<Object?, Object?>.from(value);
     final sampleIndex = (data['sampleIndex'] as num?)?.toInt();
-    final cropData = Map<Object?, Object?>.from(data['crop']! as Map);
+    final cropValue = data['crop'];
+    final cropData = cropValue is Map
+        ? Map<Object?, Object?>.from(cropValue)
+        : const <Object?, Object?>{};
     final crop = WallpaperCrop(
-      scale: (cropData['scale'] as num?)?.toDouble() ?? 1,
-      offsetX: (cropData['offsetX'] as num?)?.toDouble() ?? 0,
-      offsetY: (cropData['offsetY'] as num?)?.toDouble() ?? 0,
+      scale: ((cropData['scale'] as num?)?.toDouble() ?? 1)
+          .clamp(1, 4)
+          .toDouble(),
+      offsetX: ((cropData['offsetX'] as num?)?.toDouble() ?? 0)
+          .clamp(-4, 4)
+          .toDouble(),
+      offsetY: ((cropData['offsetY'] as num?)?.toDouble() ?? 0)
+          .clamp(-4, 4)
+          .toDouble(),
     );
     if (sampleIndex != null) {
       return bundledWallpapers[sampleIndex % bundledWallpapers.length].copyWith(
         crop: crop,
       );
     }
+    final uri = data['uri'] as String?;
+    if (uri == null || uri.isEmpty) return null;
     return Wallpaper(
-      id: data['uri']! as String,
+      id: uri,
       name: data['name'] as String? ?? 'Photo',
       palette: const [Color(0xFF202124), Color(0xFF303134), Color(0xFF8AB4F8)],
       style: 0,
-      uri: data['uri']! as String,
+      uri: uri,
       thumbnail: data['thumbnail'] as Uint8List?,
       preview: data['preview'] as Uint8List?,
       imageWidth: (data['imageWidth'] as num?)?.toInt(),

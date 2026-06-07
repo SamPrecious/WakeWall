@@ -145,7 +145,6 @@ class MainActivity : FlutterFragmentActivity() {
                         WakeWallStore(this).configuration()
                     }
                     "state" -> result.success(WakeWallStore(this).state())
-                    "diagnostics" -> result.success(WakeWallStore(this).diagnostics())
                     else -> result.notImplemented()
                 }
             }

@@ -1,22 +1,29 @@
 # WakeWall
 
-WakeWall is an Android live wallpaper prototype that prepares a fresh design
-when the device screen turns off, ready for the next wake.
+WakeWall is an Android live wallpaper app that prepares the next selected photo
+when the screen turns off, so it is ready for the next wake.
 
-## Current prototype
+## Features
 
-- Responsive single-screen Flutter interface
-- Device-proportional wallpaper preview and horizontally scrolling collection
+- Multi-photo import through Android Photos or file providers
 - Sequential and shuffle rotation modes
-- Pause, manual next, fit-mode, reorder, and remove controls
-- Non-destructive full-screen crop editor with pinch, drag, reset, and save
-- Native Kotlin `WallpaperService`
-- Forced screen-off preparation with visibility/surface recovery redraws
-- Single-frame next-wallpaper cache for near-instant rapid screen-off switching
-- Per-cycle duplicate-event protection and an in-app diagnostics panel
+- Screen-proportional preview and crop editor
+- Drag-to-reorder and drag-to-remove wallpaper collection
+- Pause and manual-next controls
+- Portable `.wakewall` backup and restore files containing photos, crops, order,
+  and settings
+- Native Kotlin live wallpaper engine with a prepared next-frame cache
 
-The prototype uses four bundled procedural designs so wake-event reliability can
-be validated before gallery permissions and image persistence are introduced.
+## Architecture
+
+- `lib/`: Flutter UI, crop editor, controller, and Android platform bridge
+- `android/.../WakeWallService.kt`: live wallpaper rendering and screen events
+- `android/.../WakeWallStore.kt`: image persistence, previews, crops, and backups
+- `android/.../MainActivity.kt`: Android pickers and Flutter platform channel
+
+WakeWall copies selected images into app-private storage as normalized JPEGs.
+The native wallpaper engine reads those files directly. Flutter receives smaller
+cached previews for the in-app UI.
 
 ## Run
 
@@ -24,38 +31,23 @@ be validated before gallery permissions and image persistence are introduced.
 flutter run
 ```
 
-Open **Settings -> Make WakeWall Active** to select the live wallpaper. The
-diagnostics panel records which Android events are received during testing.
+Open **Settings -> Use WakeWall** to select the live wallpaper.
 
-## Personal release APK
+## Verify
 
-Build the smaller ARM64 release used by modern Samsung phones:
+```powershell
+flutter test
+flutter analyze
+cd android
+.\gradlew.bat :app:compileDebugKotlin :app:lintDebug
+```
+
+## Personal Release APK
 
 ```powershell
 flutter build apk --release --split-per-abi
 ```
 
 Install `build/app/outputs/flutter-apk/app-arm64-v8a-release.apk` through Samsung
-My Files. Enable **Install unknown apps** for My Files when prompted. Developer
-Mode and USB debugging are not required after installation.
-
-Release builds currently use the Android debug signing key so they can update
-the development installation. Before public distribution, configure and safely
-back up a permanent release signing key.
-
-## Architecture
-
-- `lib/`: Flutter interface, state, ordered wallpaper collection, and native bridge
-- `android/.../WakeWallService.kt`: live wallpaper rendering and wake listeners
-- `android/.../WakeWallStore.kt`: settings, current index, and diagnostics
-- `android/.../MainActivity.kt`: Flutter platform-channel integration
-
-The app uses one persistent home screen with modal overlays. The focused crop
-editor is presented as a full-screen `auto_route` dialog.
-
-## Prototype boundaries
-
-- Gallery selection is not implemented yet.
-- Reorder/remove currently affects the Flutter prototype collection only; the
-  native sample wallpaper sequence remains fixed until URI persistence lands.
-- Fit Entire Image is reserved for real gallery images.
+My Files. Release builds currently use the Android debug signing key; configure
+a permanent signing key before public distribution.

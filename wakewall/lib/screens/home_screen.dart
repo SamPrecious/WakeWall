@@ -168,7 +168,7 @@ class _HomeScreenState extends State<HomeScreen> {
       }
     } finally {
       overlayTimer?.cancel();
-      if (mounted) setState(() => importingImages = false);
+      if (mounted && importingImages) setState(() => importingImages = false);
     }
 
     if (!mounted || controller.lastNativeError == null) return;
@@ -845,16 +845,22 @@ class _SettingsSheetState extends State<_SettingsSheet> {
       });
     }
 
-    final message = restore
-        ? await controller.restore(onOperationStarted: beginProgressDelay)
-        : await controller.backup(onOperationStarted: beginProgressDelay);
+    String? message;
+    try {
+      message = restore
+          ? await controller.restore(onOperationStarted: beginProgressDelay)
+          : await controller.backup(onOperationStarted: beginProgressDelay);
+    } finally {
+      fileProgressTimer?.cancel();
+      fileProgressTimer = null;
+      if (mounted) {
+        setState(() {
+          handlingBackup = false;
+          showingFileProgress = false;
+        });
+      }
+    }
     if (!mounted) return;
-    fileProgressTimer?.cancel();
-    fileProgressTimer = null;
-    setState(() {
-      handlingBackup = false;
-      showingFileProgress = false;
-    });
     final text = controller.lastNativeError ?? message;
     if (text == null) return;
     ScaffoldMessenger.of(context)

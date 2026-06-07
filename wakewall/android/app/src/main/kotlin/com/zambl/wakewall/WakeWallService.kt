@@ -20,6 +20,7 @@ import android.os.Handler
 import android.os.Looper
 import android.service.wallpaper.WallpaperService
 import android.view.SurfaceHolder
+import androidx.core.content.ContextCompat
 import kotlin.math.max
 import kotlin.math.min
 
@@ -48,11 +49,11 @@ class WakeWallService : WallpaperService() {
                     ACTION_CONFIGURATION_UPDATED -> {
                         currentIndex = store.index
                         invalidatePreparedFrame()
-                        handler.post(rebuildRunner)
+                        scheduleRebuild()
                     }
                     ACTION_CROP_UPDATED -> {
                         invalidatePreparedFrame()
-                        handler.post(rebuildRunner)
+                        scheduleRebuild()
                     }
                 }
             }
@@ -66,12 +67,12 @@ class WakeWallService : WallpaperService() {
                 addAction(ACTION_CONFIGURATION_UPDATED)
                 addAction(ACTION_CROP_UPDATED)
             }
-            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
-                registerReceiver(screenReceiver, filter, RECEIVER_NOT_EXPORTED)
-            } else {
-                @Suppress("DEPRECATION")
-                registerReceiver(screenReceiver, filter)
-            }
+            ContextCompat.registerReceiver(
+                this@WakeWallService,
+                screenReceiver,
+                filter,
+                ContextCompat.RECEIVER_NOT_EXPORTED,
+            )
         }
 
         override fun onDestroy() {
@@ -83,7 +84,7 @@ class WakeWallService : WallpaperService() {
 
         override fun onVisibilityChanged(isVisible: Boolean) {
             visible = isVisible
-            if (isVisible) handler.post(rebuildRunner)
+            if (isVisible) scheduleRebuild() else handler.removeCallbacks(rebuildRunner)
         }
 
         override fun onSurfaceChanged(
@@ -93,6 +94,12 @@ class WakeWallService : WallpaperService() {
             height: Int,
         ) {
             super.onSurfaceChanged(holder, format, width, height)
+            scheduleRebuild()
+        }
+
+        // Collapses repeated lifecycle events into one redraw.
+        private fun scheduleRebuild() {
+            handler.removeCallbacks(rebuildRunner)
             handler.post(rebuildRunner)
         }
 

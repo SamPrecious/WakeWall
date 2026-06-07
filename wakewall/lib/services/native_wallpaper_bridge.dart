@@ -7,26 +7,21 @@ class NativeWallpaperBridge {
 
   void setImageImportStartedListener(VoidCallback? listener) {
     _onImageImportStarted = listener;
-    if (listener == null) return;
-    _channel.setMethodCallHandler((call) async {
-      if (call.method == 'imageImportStarted') {
-        _onImageImportStarted?.call();
-      }
-      if (call.method == 'fileOperationStarted') {
-        _onFileOperationStarted?.call();
-      }
-    });
+    if (listener != null) _installCallbackHandler();
   }
 
   void setFileOperationStartedListener(VoidCallback? listener) {
     _onFileOperationStarted = listener;
-    if (listener == null) return;
+    if (listener != null) _installCallbackHandler();
+  }
+
+  void _installCallbackHandler() {
     _channel.setMethodCallHandler((call) async {
-      if (call.method == 'imageImportStarted') {
-        _onImageImportStarted?.call();
-      }
-      if (call.method == 'fileOperationStarted') {
-        _onFileOperationStarted?.call();
+      switch (call.method) {
+        case 'imageImportStarted':
+          _onImageImportStarted?.call();
+        case 'fileOperationStarted':
+          _onFileOperationStarted?.call();
       }
     });
   }
@@ -133,12 +128,5 @@ class NativeWallpaperBridge {
     return Map<String, Object?>.from(
       await _channel.invokeMethod<Map<Object?, Object?>>('state') ?? const {},
     );
-  }
-
-  Future<Map<String, Object?>> diagnostics() async {
-    final result = await _channel.invokeMapMethod<String, Object?>(
-      'diagnostics',
-    );
-    return result ?? const {};
   }
 }

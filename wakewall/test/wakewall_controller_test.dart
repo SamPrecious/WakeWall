@@ -47,6 +47,27 @@ void main() {
     expect(controller.selectedPreview, bridge.previewBytes);
   });
 
+  test('partial state refresh preserves settings it did not receive', () async {
+    final controller = WakeWallController(bridge: _PartialStateBridge());
+
+    await controller.initialize();
+    await controller.refreshState();
+
+    expect(controller.order, RotationOrder.shuffle);
+    expect(controller.photoSource, PhotoSource.files);
+    expect(controller.selectedIndex, 1);
+  });
+
+  test('controller skips malformed native wallpaper entries', () async {
+    final controller = WakeWallController(bridge: _MalformedBridge());
+
+    await controller.initialize();
+
+    expect(controller.wallpapers.length, 1);
+    expect(controller.wallpapers.single.name, 'Usable');
+    expect(controller.wallpapers.single.crop.isDefault, isTrue);
+  });
+
   test('controller saves the preferred photo source', () async {
     final bridge = _FakeNativeWallpaperBridge(currentIndex: 0);
     final controller = WakeWallController(bridge: bridge);
@@ -265,6 +286,32 @@ class _IncrementalImportBridge extends _FakeNativeWallpaperBridge {
         'name': 'Incremental photo.jpg',
         'crop': const {'scale': 1.0, 'offsetX': 0.0, 'offsetY': 0.0},
       },
+    ],
+  };
+}
+
+class _PartialStateBridge extends _FakeNativeWallpaperBridge {
+  _PartialStateBridge() : super(currentIndex: 0);
+
+  @override
+  Future<Map<String, Object?>> configuration() async => {
+    ...await super.configuration(),
+    'shuffle': true,
+    'photoSource': 'files',
+  };
+
+  @override
+  Future<Map<String, Object?>> state() async => {'index': 1};
+}
+
+class _MalformedBridge extends NativeWallpaperBridge {
+  @override
+  Future<Map<String, Object?>> configuration() async => {
+    'index': 0,
+    'wallpapers': [
+      null,
+      const <String, Object?>{},
+      {'uri': 'local:usable.jpg', 'name': 'Usable'},
     ],
   };
 }

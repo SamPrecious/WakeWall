@@ -21,6 +21,7 @@ import java.io.ByteArrayOutputStream
 import java.io.File
 import java.io.FileInputStream
 import java.io.InputStream
+import java.security.MessageDigest
 import java.util.UUID
 import java.util.zip.ZipEntry
 import java.util.zip.ZipInputStream
@@ -54,8 +55,10 @@ class WakeWallStore(context: Context) {
         get() {
             val saved = prefs.getString("wallpapers", null)
             if (saved == null) return emptyList()
-            val array = JSONArray(saved)
-            return List(array.length()) { array.getString(it) }
+            return runCatching {
+                val array = JSONArray(saved)
+                List(array.length()) { array.getString(it) }
+            }.getOrDefault(emptyList())
         }
 
     val wallpaperCount: Int
@@ -110,7 +113,7 @@ class WakeWallStore(context: Context) {
                 return@forEach
             }
             val value = "$LOCAL_PREFIX$id"
-            prefs.edit().putString("name_${value.hashCode()}", image.name).apply()
+            prefs.edit().putString(nameKey(value), image.name).apply()
             updated.add(value)
             imported.add(value)
         }
@@ -125,6 +128,7 @@ class WakeWallStore(context: Context) {
         val removed = updated.removeAt(index)
         localFile(removed)?.delete()
         deleteCachedPreviews(removed)
+        deleteMetadata(removed)
         saveWallpapers(updated)
         val nextIndex = updated.indexOf(selected).takeIf { it >= 0 }
             ?: index.coerceAtMost((updated.size - 1).coerceAtLeast(0))
@@ -215,15 +219,24 @@ class WakeWallStore(context: Context) {
             .putFloat("${key}_scale", scale.toFloat())
             .putFloat("${key}_x", offsetX.toFloat())
             .putFloat("${key}_y", offsetY.toFloat())
+            .remove("${legacyCropKey(index)}_scale")
+            .remove("${legacyCropKey(index)}_x")
+            .remove("${legacyCropKey(index)}_y")
             .apply()
     }
 
     fun crop(index: Int): CropTransform {
-        val key = cropKey(index)
+        val value = wallpaperAt(index) ?: return CropTransform(1f, 0f, 0f)
+        return crop(value)
+    }
+
+    private fun crop(value: String): CropTransform {
+        val key = cropKey(value)
+        val legacyKey = legacyCropKey(value)
         return CropTransform(
-            scale = prefs.getFloat("${key}_scale", 1f),
-            offsetX = prefs.getFloat("${key}_x", 0f),
-            offsetY = prefs.getFloat("${key}_y", 0f),
+            scale = floatPreference("${key}_scale", "${legacyKey}_scale", 1f),
+            offsetX = floatPreference("${key}_x", "${legacyKey}_x", 0f),
+            offsetY = floatPreference("${key}_y", "${legacyKey}_y", 0f),
         )
     }
 
@@ -257,11 +270,17 @@ class WakeWallStore(context: Context) {
     fun writeBackup(output: java.io.OutputStream) {
         migrateExternalImages()
         val saved = wallpapers
+        require(saved.size <= MAX_BACKUP_WALLPAPERS) {
+            "This collection is too large to back up."
+        }
         val manifestWallpapers = JSONArray()
         ZipOutputStream(output.buffered()).use { zip ->
             saved.forEachIndexed { index, value ->
                 val source = localFile(value)
                     ?: throw IllegalStateException("A wallpaper could not be read.")
+                require(source.length() <= MAX_BACKUP_IMAGE_BYTES) {
+                    "A wallpaper is too large to back up."
+                }
                 val entryName = "images/$index.jpg"
                 zip.putNextEntry(ZipEntry(entryName))
                 source.inputStream().use { it.copyTo(zip) }
@@ -293,15 +312,23 @@ class WakeWallStore(context: Context) {
         val restoreRoot = File(appContext.cacheDir, "restore_${UUID.randomUUID()}").apply { mkdirs() }
         try {
             var manifestText: String? = null
+            var extractedBytes = 0L
             ZipInputStream(input.buffered()).use { zip ->
                 var entry = zip.nextEntry
                 while (entry != null) {
                     if (!entry.isDirectory) {
                         if (entry.name == "manifest.json") {
-                            manifestText = zip.readBytes().toString(Charsets.UTF_8)
+                            manifestText = readLimited(zip, MAX_BACKUP_MANIFEST_BYTES)
+                                .toString(Charsets.UTF_8)
                         } else if (entry.name.matches(Regex("images/\\d+\\.jpg"))) {
                             val destination = File(restoreRoot, entry.name.substringAfterLast('/'))
-                            destination.outputStream().use { zip.copyTo(it) }
+                            val copied = destination.outputStream().use {
+                                copyLimited(zip, it, MAX_BACKUP_IMAGE_BYTES)
+                            }
+                            extractedBytes += copied
+                            require(extractedBytes <= MAX_BACKUP_TOTAL_BYTES) {
+                                "This backup is too large to restore."
+                            }
                         }
                     }
                     zip.closeEntry()
@@ -312,6 +339,9 @@ class WakeWallStore(context: Context) {
             require(manifest.optString("format") == BACKUP_FORMAT) { "This is not a WakeWall backup." }
             require(manifest.optInt("version") == 1) { "This backup version is not supported." }
             val entries = manifest.getJSONArray("wallpapers")
+            require(entries.length() <= MAX_BACKUP_WALLPAPERS) {
+                "This backup contains too many wallpapers."
+            }
             val restored = mutableListOf<RestoredWallpaper>()
             for (position in 0 until entries.length()) {
                 val item = entries.getJSONObject(position)
@@ -325,37 +355,55 @@ class WakeWallStore(context: Context) {
                         source = source,
                         name = item.optString("name", "Photo"),
                         crop = CropTransform(
-                            crop.optDouble("scale", 1.0).toFloat(),
-                            crop.optDouble("offsetX", 0.0).toFloat(),
-                            crop.optDouble("offsetY", 0.0).toFloat(),
+                            crop.optDouble("scale", 1.0).toFloat().coerceIn(1f, 4f),
+                            crop.optDouble("offsetX", 0.0).toFloat().coerceIn(-4f, 4f),
+                            crop.optDouble("offsetY", 0.0).toFloat().coerceIn(-4f, 4f),
                         ),
                     ),
                 )
             }
 
             val wallpaperDirectory = File(appContext.filesDir, "wallpapers").apply { mkdirs() }
-            val newValues = restored.map { restoredWallpaper ->
-                val destination = File(wallpaperDirectory, "${UUID.randomUUID()}.jpg")
-                restoredWallpaper.source.copyTo(destination)
-                "$LOCAL_PREFIX${destination.name}".also { value ->
-                    prefs.edit()
-                        .putString("name_${value.hashCode()}", restoredWallpaper.name)
-                        .putFloat("${cropKey(value)}_scale", restoredWallpaper.crop.scale)
-                        .putFloat("${cropKey(value)}_x", restoredWallpaper.crop.offsetX)
-                        .putFloat("${cropKey(value)}_y", restoredWallpaper.crop.offsetY)
-                        .apply()
+            val createdFiles = mutableListOf<File>()
+            val newValues = try {
+                restored.map { restoredWallpaper ->
+                    val destination = File(wallpaperDirectory, "${UUID.randomUUID()}.jpg")
+                    restoredWallpaper.source.copyTo(destination)
+                    createdFiles.add(destination)
+                    "$LOCAL_PREFIX${destination.name}"
                 }
+            } catch (error: Exception) {
+                createdFiles.forEach(File::delete)
+                throw error
             }
             val oldValues = wallpapers
-            saveWallpapers(newValues)
-            prefs.edit()
+            val editor = prefs.edit()
+                .putString("wallpapers", JSONArray(newValues).toString())
                 .putInt("index", manifest.optInt("index", 0).coerceAtLeast(0))
                 .putBoolean("paused", manifest.optBoolean("paused", false))
                 .putBoolean("shuffle", manifest.optBoolean("shuffle", true))
                 .putString("fit", manifest.optString("fit", "cropToFill"))
                 .putString("photo_source", manifest.optString("photoSource", "askEveryTime"))
                 .putInt("image_format_version", 1)
-                .apply()
+            oldValues.forEach { value ->
+                editor
+                    .remove(nameKey(value))
+                    .remove(legacyNameKey(value))
+                    .remove("${cropKey(value)}_scale")
+                    .remove("${cropKey(value)}_x")
+                    .remove("${cropKey(value)}_y")
+                    .remove("${legacyCropKey(value)}_scale")
+                    .remove("${legacyCropKey(value)}_x")
+                    .remove("${legacyCropKey(value)}_y")
+            }
+            newValues.zip(restored).forEach { (value, restoredWallpaper) ->
+                editor
+                    .putString(nameKey(value), restoredWallpaper.name)
+                    .putFloat("${cropKey(value)}_scale", restoredWallpaper.crop.scale)
+                    .putFloat("${cropKey(value)}_x", restoredWallpaper.crop.offsetX)
+                    .putFloat("${cropKey(value)}_y", restoredWallpaper.crop.offsetY)
+            }
+            editor.apply()
             oldValues.forEach { value ->
                 localFile(value)?.delete()
                 deleteCachedPreviews(value)
@@ -364,24 +412,6 @@ class WakeWallStore(context: Context) {
             restoreRoot.deleteRecursively()
         }
     }
-
-    fun diagnostics(): Map<String, Any> = mapOf(
-        "status" to if (paused) "Paused" else "Ready",
-        "current_wallpaper" to if (wallpaperCount == 0) "None" else "${index + 1} of $wallpaperCount",
-        "last_event" to (prefs.getString("last_event", "None yet") ?: "None yet"),
-        "last_trigger" to (prefs.getString("last_trigger", "None yet") ?: "None yet"),
-        "screen_on_count" to prefs.getInt("screen_on_count", 0),
-        "screen_off_count" to prefs.getInt("screen_off_count", 0),
-        "change_count" to prefs.getInt("change_count", 0),
-        "last_draw_reason" to (prefs.getString("last_draw_reason", "None yet") ?: "None yet"),
-        "last_draw_succeeded" to prefs.getBoolean("last_draw_succeeded", false),
-        "screen_off_draw_success_count" to prefs.getInt("screen_off_prepare_success_count", 0),
-        "screen_off_draw_failure_count" to prefs.getInt("screen_off_prepare_failure_count", 0),
-        "last_screen_off_used_prepared_frame" to prefs.getBoolean("last_screen_off_used_prepared_frame", false),
-        "screen_off_prepared_frame_count" to prefs.getInt("screen_off_prepared_count", 0),
-        "screen_off_fallback_render_count" to prefs.getInt("screen_off_fallback_count", 0),
-        "last_import_diagnostics" to (prefs.getString("last_import_diagnostics", "None yet") ?: "None yet"),
-    )
 
     private fun saveWallpapers(wallpapers: List<String>) {
         prefs.edit().putString("wallpapers", JSONArray(wallpapers).toString()).apply()
@@ -406,9 +436,40 @@ class WakeWallStore(context: Context) {
         prefs.edit().putInt("image_format_version", 1).apply()
     }
 
-    private fun cropKey(index: Int): String = "crop_${wallpaperAt(index)?.hashCode() ?: index}"
+    private fun cropKey(index: Int): String =
+        wallpaperAt(index)?.let(::cropKey) ?: "crop_index_$index"
 
-    private fun cropKey(value: String): String = "crop_${value.hashCode()}"
+    private fun cropKey(value: String): String = "crop_${storageKey(value)}"
+
+    private fun legacyCropKey(index: Int): String =
+        wallpaperAt(index)?.let(::legacyCropKey) ?: "crop_$index"
+
+    private fun legacyCropKey(value: String): String = "crop_${value.hashCode()}"
+
+    private fun nameKey(value: String): String = "name_${storageKey(value)}"
+
+    private fun legacyNameKey(value: String): String = "name_${value.hashCode()}"
+
+    private fun storageKey(value: String): String =
+        MessageDigest.getInstance("SHA-256")
+            .digest(value.toByteArray())
+            .joinToString("") { "%02x".format(it) }
+
+    private fun floatPreference(key: String, legacyKey: String, default: Float): Float =
+        if (prefs.contains(key)) prefs.getFloat(key, default) else prefs.getFloat(legacyKey, default)
+
+    private fun deleteMetadata(value: String) {
+        prefs.edit()
+            .remove(nameKey(value))
+            .remove(legacyNameKey(value))
+            .remove("${cropKey(value)}_scale")
+            .remove("${cropKey(value)}_x")
+            .remove("${cropKey(value)}_y")
+            .remove("${legacyCropKey(value)}_scale")
+            .remove("${legacyCropKey(value)}_x")
+            .remove("${legacyCropKey(value)}_y")
+            .apply()
+    }
 
     // Creates the small preview Flutter displays without passing the full photo.
     private fun wallpaperMap(index: Int, value: String): Map<String, Any> {
@@ -431,7 +492,9 @@ class WakeWallStore(context: Context) {
 
     private fun displayName(value: String): String {
         if (value.startsWith(LOCAL_PREFIX)) {
-            return prefs.getString("name_${value.hashCode()}", "Photo") ?: "Photo"
+            return prefs.getString(nameKey(value), null)
+                ?: prefs.getString(legacyNameKey(value), "Photo")
+                ?: "Photo"
         }
         val uri = Uri.parse(value)
         return runCatching {
@@ -468,7 +531,7 @@ class WakeWallStore(context: Context) {
     // Reuses previews from private storage instead of decoding photos on every tap.
     private fun cachedPreview(value: String, maxEdge: Float, quality: Int, suffix: String): ByteArray? {
         val directory = File(appContext.cacheDir, "wallpaper_previews").apply { mkdirs() }
-        val file = File(directory, "${value.hashCode()}_$suffix.jpg")
+        val file = File(directory, "${storageKey(value)}_$suffix.jpg")
         if (file.exists()) return runCatching { file.readBytes() }.getOrNull()
         val bitmap = fullAspectPreview(value, maxEdge) ?: return null
         val saved = runCatching {
@@ -480,7 +543,10 @@ class WakeWallStore(context: Context) {
 
     private fun deleteCachedPreviews(value: String) {
         val directory = File(appContext.cacheDir, "wallpaper_previews")
-        listOf("small", "large").forEach { File(directory, "${value.hashCode()}_$it.jpg").delete() }
+        listOf("small", "large").forEach {
+            File(directory, "${storageKey(value)}_$it.jpg").delete()
+            File(directory, "${value.hashCode()}_$it.jpg").delete()
+        }
     }
 
     private fun imageDimensions(value: String): Pair<Int, Int>? {
@@ -510,7 +576,7 @@ class WakeWallStore(context: Context) {
             )
         }
         val value = "$LOCAL_PREFIX$id"
-        prefs.edit().putString("name_${value.hashCode()}", name).apply()
+        prefs.edit().putString(nameKey(value), name).apply()
         return ImportOutcome(value = value)
     }
 
@@ -532,7 +598,9 @@ class WakeWallStore(context: Context) {
                 val copied = copy(source)
                 diagnostics.add("$label:${if (copied) source.length() else "unavailable"}")
                 if (!copied || source.length() <= 0) return@forEach
-                if (source.length() > (fallbackBytes?.size ?: 0)) {
+                if (source.length() <= MAX_FALLBACK_BYTES &&
+                    source.length() > (fallbackBytes?.size ?: 0)
+                ) {
                     fallbackBytes = runCatching { source.readBytes() }.getOrNull()
                 }
                 val dimensions = imageDimensions(source)
@@ -559,7 +627,9 @@ class WakeWallStore(context: Context) {
                     val copied = copy(source)
                     diagnostics.add("$label:${if (copied) source.length() else "unavailable"}")
                     if (!copied || source.length() <= 0) return@forEach
-                    if (source.length() > (fallbackBytes?.size ?: 0)) {
+                    if (source.length() <= MAX_FALLBACK_BYTES &&
+                        source.length() > (fallbackBytes?.size ?: 0)
+                    ) {
                         fallbackBytes = runCatching { source.readBytes() }.getOrNull()
                     }
                     val dimensions = imageDimensions(source)
@@ -748,6 +818,7 @@ class WakeWallStore(context: Context) {
     private fun normalizeLocalImage(value: String): String? {
         val original = localFile(value) ?: return null
         val name = displayName(value)
+        val savedCrop = crop(value)
         val replacement = File(original.parentFile, "${UUID.randomUUID()}.jpg")
         val decoded = runCatching {
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P) {
@@ -770,8 +841,33 @@ class WakeWallStore(context: Context) {
         }
         original.delete()
         val replacementValue = "$LOCAL_PREFIX${replacement.name}"
-        prefs.edit().putString("name_${replacementValue.hashCode()}", name).apply()
+        prefs.edit()
+            .putString(nameKey(replacementValue), name)
+            .putFloat("${cropKey(replacementValue)}_scale", savedCrop.scale)
+            .putFloat("${cropKey(replacementValue)}_x", savedCrop.offsetX)
+            .putFloat("${cropKey(replacementValue)}_y", savedCrop.offsetY)
+            .apply()
+        deleteMetadata(value)
+        deleteCachedPreviews(value)
         return replacementValue
+    }
+
+    private fun readLimited(input: InputStream, limit: Long): ByteArray {
+        val output = ByteArrayOutputStream()
+        copyLimited(input, output, limit)
+        return output.toByteArray()
+    }
+
+    private fun copyLimited(input: InputStream, output: java.io.OutputStream, limit: Long): Long {
+        val buffer = ByteArray(DEFAULT_BUFFER_SIZE)
+        var copied = 0L
+        while (true) {
+            val count = input.read(buffer)
+            if (count < 0) return copied
+            copied += count
+            require(copied <= limit) { "This backup contains a file that is too large." }
+            output.write(buffer, 0, count)
+        }
     }
 
     private fun saveAsJpeg(decoded: Bitmap, destination: File): Boolean {
@@ -806,6 +902,11 @@ class WakeWallStore(context: Context) {
         private const val SAMPLE_PREFIX = "sample:"
         private const val LOCAL_PREFIX = "local:"
         private const val BACKUP_FORMAT = "com.zambl.wakewall.backup"
+        private const val MAX_BACKUP_WALLPAPERS = 1000
+        private const val MAX_BACKUP_MANIFEST_BYTES = 1024L * 1024
+        private const val MAX_BACKUP_IMAGE_BYTES = 64L * 1024 * 1024
+        private const val MAX_BACKUP_TOTAL_BYTES = 2L * 1024 * 1024 * 1024
+        private const val MAX_FALLBACK_BYTES = 64L * 1024 * 1024
     }
 }
 
