@@ -93,6 +93,7 @@ void main() {
     expect(find.text('Backup'), findsOneWidget);
     expect(find.text('Restore'), findsOneWidget);
     expect(find.text('Use WakeWall'), findsOneWidget);
+    expect(find.text('Wake-event diagnostics'), findsNothing);
   });
 
   testWidgets('WakeWall renders the populated home screen', (tester) async {

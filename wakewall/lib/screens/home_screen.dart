@@ -767,12 +767,6 @@ class _SettingsSheetState extends State<_SettingsSheet> {
                 icon: const Icon(Icons.wallpaper_rounded),
                 label: const Text('Use WakeWall'),
               ),
-              const SizedBox(height: 10),
-              OutlinedButton.icon(
-                onPressed: () => _showDiagnostics(context),
-                icon: const Icon(Icons.monitor_heart_outlined),
-                label: const Text('Wake-event diagnostics'),
-              ),
             ],
           ),
         );
@@ -809,29 +803,6 @@ class _SettingsSheetState extends State<_SettingsSheet> {
           ),
         ),
       );
-  }
-
-  Future<void> _showDiagnostics(BuildContext context) async {
-    final result = await controller.diagnostics();
-    if (!context.mounted) return;
-    await showDialog<void>(
-      context: context,
-      builder: (context) => AlertDialog(
-        backgroundColor: WakeWallColors.surface,
-        title: const Text('Wake diagnostics'),
-        content: SelectableText(
-          result.entries
-              .map((entry) => '${entry.key}: ${entry.value}')
-              .join('\n'),
-        ),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.pop(context),
-            child: const Text('Done'),
-          ),
-        ],
-      ),
-    );
   }
 }
 
