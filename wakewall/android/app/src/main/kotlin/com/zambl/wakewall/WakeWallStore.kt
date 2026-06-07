@@ -883,7 +883,7 @@ class WakeWallStore(context: Context) {
         if (decoded !== flattened) decoded.recycle()
         val saved = runCatching {
             destination.outputStream().use {
-                flattened.compress(Bitmap.CompressFormat.JPEG, 94, it)
+                flattened.compress(Bitmap.CompressFormat.JPEG, 98, it)
             }
         }.getOrDefault(false)
         flattened.recycle()
@@ -900,7 +900,7 @@ class WakeWallStore(context: Context) {
     }
 
     companion object {
-        private const val MAX_IMAGE_EDGE = 4096f
+        private const val MAX_IMAGE_EDGE = 5120f
         private const val SMALL_PREVIEW_EDGE = 720f
         private const val LARGE_PREVIEW_EDGE = 1920f
         private const val SAMPLE_PREFIX = "sample:"

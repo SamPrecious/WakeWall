@@ -177,6 +177,7 @@ class WakeWallService : WallpaperService() {
                 drawSucceeded = drawSucceeded,
                 usedPreparedFrame = prepared != null,
             )
+            scheduleNextFramePreparation()
         }
 
         // Reposts the retained frame before Android reveals the wallpaper surface.
@@ -388,8 +389,13 @@ class WakeWallService : WallpaperService() {
         private fun drawPhoto(canvas: Canvas, index: Int, uriValue: String): Boolean {
             val width = canvas.width.toFloat()
             val height = canvas.height.toFloat()
-            val bitmap = decodePhoto(uriValue, canvas.width, canvas.height) ?: return false
             val crop = store.crop(index)
+            val bitmap = decodePhoto(
+                uriValue,
+                canvas.width,
+                canvas.height,
+                crop.scale,
+            ) ?: return false
             canvas.drawColor(Color.BLACK)
             canvas.save()
 
@@ -417,14 +423,28 @@ class WakeWallService : WallpaperService() {
                 (width + drawnWidth) / 2f,
                 (height + drawnHeight) / 2f,
             )
-            canvas.drawBitmap(bitmap, null, destination, Paint(Paint.ANTI_ALIAS_FLAG or Paint.FILTER_BITMAP_FLAG))
+            canvas.drawBitmap(
+                bitmap,
+                null,
+                destination,
+                Paint(
+                    Paint.ANTI_ALIAS_FLAG or
+                        Paint.FILTER_BITMAP_FLAG or
+                        Paint.DITHER_FLAG,
+                ),
+            )
             canvas.restore()
             bitmap.recycle()
             return true
         }
 
         // Loads a camera photo near the screen size and respects its saved orientation.
-        private fun decodePhoto(uriValue: String, targetWidth: Int, targetHeight: Int): Bitmap? {
+        private fun decodePhoto(
+            uriValue: String,
+            targetWidth: Int,
+            targetHeight: Int,
+            cropScale: Float,
+        ): Bitmap? {
             return runCatching {
                 val localFile = store.localFile(uriValue)
                 if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P) {
@@ -434,8 +454,11 @@ class WakeWallService : WallpaperService() {
                         ImageDecoder.createSource(contentResolver, android.net.Uri.parse(uriValue))
                     }
                     ImageDecoder.decodeBitmap(source) { decoder, info, _ ->
-                        val widthScale = targetWidth / info.size.width.toFloat()
-                        val heightScale = targetHeight / info.size.height.toFloat()
+                        val qualityScale = cropScale.coerceIn(1f, 4f)
+                        val widthScale =
+                            targetWidth * qualityScale / info.size.width.toFloat()
+                        val heightScale =
+                            targetHeight * qualityScale / info.size.height.toFloat()
                         val scale = (
                             if (store.fit == "fitEntireImage") {
                                 min(widthScale, heightScale)

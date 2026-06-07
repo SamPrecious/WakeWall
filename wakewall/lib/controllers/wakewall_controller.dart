@@ -386,16 +386,16 @@ Map<String, Object?>? _normalizeFailedImage(Map<String, Object?> value) {
     final decoded = image.decodeImage(value['bytes']! as Uint8List);
     if (decoded == null) return null;
     var normalized = image.bakeOrientation(decoded);
-    if (normalized.width > 4096 || normalized.height > 4096) {
+    if (normalized.width > 5120 || normalized.height > 5120) {
       if (normalized.width >= normalized.height) {
-        normalized = image.copyResize(normalized, width: 4096);
+        normalized = image.copyResize(normalized, width: 5120);
       } else {
-        normalized = image.copyResize(normalized, height: 4096);
+        normalized = image.copyResize(normalized, height: 5120);
       }
     }
     return {
       'name': value['name']! as String,
-      'bytes': Uint8List.fromList(image.encodeJpg(normalized, quality: 94)),
+      'bytes': Uint8List.fromList(image.encodeJpg(normalized, quality: 98)),
     };
   } catch (_) {
     return null;
