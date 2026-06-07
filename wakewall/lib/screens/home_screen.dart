@@ -672,17 +672,26 @@ class _WallpaperTile extends StatelessWidget {
   }
 }
 
-class _SettingsSheet extends StatelessWidget {
+class _SettingsSheet extends StatefulWidget {
   const _SettingsSheet({required this.controller});
 
   final WakeWallController controller;
+
+  @override
+  State<_SettingsSheet> createState() => _SettingsSheetState();
+}
+
+class _SettingsSheetState extends State<_SettingsSheet> {
+  bool handlingBackup = false;
+
+  WakeWallController get controller => widget.controller;
 
   @override
   Widget build(BuildContext context) {
     return ListenableBuilder(
       listenable: controller,
       builder: (context, _) {
-        return Padding(
+        return SingleChildScrollView(
           padding: const EdgeInsets.fromLTRB(22, 4, 22, 24),
           child: Column(
             mainAxisSize: MainAxisSize.min,
@@ -733,6 +742,26 @@ class _SettingsSheet extends StatelessWidget {
                 onChanged: controller.setPaused,
               ),
               const SizedBox(height: 20),
+              Row(
+                children: [
+                  Expanded(
+                    child: OutlinedButton.icon(
+                      onPressed: handlingBackup ? null : () => _backup(false),
+                      icon: const Icon(Icons.save_alt_rounded),
+                      label: const Text('Backup'),
+                    ),
+                  ),
+                  const SizedBox(width: 10),
+                  Expanded(
+                    child: OutlinedButton.icon(
+                      onPressed: handlingBackup ? null : () => _backup(true),
+                      icon: const Icon(Icons.restore_rounded),
+                      label: const Text('Restore'),
+                    ),
+                  ),
+                ],
+              ),
+              const SizedBox(height: 10),
               FilledButton.icon(
                 onPressed: controller.openWallpaperPicker,
                 icon: const Icon(Icons.wallpaper_rounded),
@@ -749,6 +778,37 @@ class _SettingsSheet extends StatelessWidget {
         );
       },
     );
+  }
+
+  Future<void> _backup(bool restore) async {
+    setState(() => handlingBackup = true);
+    final message = restore
+        ? await controller.restore()
+        : await controller.backup();
+    if (!mounted) return;
+    setState(() => handlingBackup = false);
+    final text = controller.lastNativeError ?? message;
+    if (text == null) return;
+    ScaffoldMessenger.of(context)
+      ..hideCurrentSnackBar()
+      ..showSnackBar(
+        SnackBar(
+          content: Row(
+            children: [
+              Icon(
+                controller.lastNativeError == null
+                    ? Icons.check_circle_outline_rounded
+                    : Icons.error_outline_rounded,
+                color: controller.lastNativeError == null
+                    ? WakeWallColors.tealStrong
+                    : WakeWallColors.danger,
+              ),
+              const SizedBox(width: 12),
+              Expanded(child: Text(text)),
+            ],
+          ),
+        ),
+      );
   }
 
   Future<void> _showDiagnostics(BuildContext context) async {

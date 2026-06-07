@@ -14,6 +14,8 @@ import java.util.concurrent.Executors
 class MainActivity : FlutterFragmentActivity() {
     private val channelName = "com.zambl.wakewall/control"
     private var pendingImageResult: MethodChannel.Result? = null
+    private var pendingBackupResult: MethodChannel.Result? = null
+    private var pendingRestoreResult: MethodChannel.Result? = null
     private val imagePicker = registerForActivityResult(
         ActivityResultContracts.PickMultipleVisualMedia(),
     ) { uris ->
@@ -24,6 +26,16 @@ class MainActivity : FlutterFragmentActivity() {
     ) { uris ->
         handlePickedImages(uris)
     }
+    private val backupFilePicker = registerForActivityResult(
+        ActivityResultContracts.CreateDocument("application/zip"),
+    ) { uri ->
+        handleBackupLocation(uri)
+    }
+    private val restoreFilePicker = registerForActivityResult(
+        ActivityResultContracts.OpenDocument(),
+    ) { uri ->
+        handleRestoreFile(uri)
+    }
 
     // Connects Flutter's controls to the Android wallpaper service.
     override fun configureFlutterEngine(flutterEngine: FlutterEngine) {
@@ -33,6 +45,8 @@ class MainActivity : FlutterFragmentActivity() {
                 when (call.method) {
                     "pickImages" -> pickImages(result)
                     "pickImagesFromFiles" -> pickImagesFromFiles(result)
+                    "backup" -> createBackup(result)
+                    "restore" -> restoreBackup(result)
                     "importNormalizedImages" -> {
                         val images = call.argument<List<Map<String, Any>>>("images").orEmpty()
                             .mapNotNull { image ->
@@ -188,6 +202,56 @@ class MainActivity : FlutterFragmentActivity() {
         }
         pendingImageResult = result
         documentImagePicker.launch(arrayOf("image/*"))
+    }
+
+    private fun createBackup(result: MethodChannel.Result) {
+        if (pendingBackupResult != null) {
+            result.error("backup_open", "A backup save screen is already open.", null)
+            return
+        }
+        pendingBackupResult = result
+        backupFilePicker.launch("WakeWall-backup.wakewall")
+    }
+
+    private fun restoreBackup(result: MethodChannel.Result) {
+        if (pendingRestoreResult != null) {
+            result.error("restore_open", "A restore screen is already open.", null)
+            return
+        }
+        pendingRestoreResult = result
+        restoreFilePicker.launch(arrayOf("application/zip", "application/octet-stream", "*/*"))
+    }
+
+    private fun handleBackupLocation(uri: Uri?) {
+        val result = pendingBackupResult ?: return
+        pendingBackupResult = null
+        if (uri == null) {
+            result.success(mapOf("cancelled" to true))
+            return
+        }
+        runInBackground(result) {
+            contentResolver.openOutputStream(uri, "w")?.use { WakeWallStore(this).writeBackup(it) }
+                ?: error("WakeWall could not create the backup file.")
+            mapOf("message" to "Backup saved.")
+        }
+    }
+
+    private fun handleRestoreFile(uri: Uri?) {
+        val result = pendingRestoreResult ?: return
+        pendingRestoreResult = null
+        if (uri == null) {
+            result.success(mapOf("cancelled" to true))
+            return
+        }
+        runInBackground(result) {
+            val store = WakeWallStore(this)
+            contentResolver.openInputStream(uri)?.use(store::restoreBackup)
+                ?: error("WakeWall could not open the backup file.")
+            notifyWallpaperService()
+            store.configuration().toMutableMap().apply {
+                put("message", "Backup restored.")
+            }
+        }
     }
 
     private fun notifyWallpaperService() {

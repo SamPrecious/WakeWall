@@ -58,6 +58,18 @@ void main() {
     expect(bridge.photoSource, 'files');
   });
 
+  test('controller applies a restored backup configuration', () async {
+    final bridge = _FakeNativeWallpaperBridge(currentIndex: 0);
+    final controller = WakeWallController(bridge: bridge);
+
+    await controller.initialize();
+    final message = await controller.restore();
+
+    expect(message, 'Backup restored.');
+    expect(controller.selectedIndex, 1);
+    expect(controller.order, RotationOrder.shuffle);
+  });
+
   test('controller adds and removes user images through Android', () async {
     final bridge = _FakeNativeWallpaperBridge(currentIndex: 0);
     final controller = WakeWallController(bridge: bridge);
@@ -186,6 +198,14 @@ class _FakeNativeWallpaperBridge extends NativeWallpaperBridge {
     });
     return configuration();
   }
+
+  @override
+  Future<Map<String, Object?>> restore() async => {
+    ...await configuration(),
+    'index': 1,
+    'shuffle': true,
+    'message': 'Backup restored.',
+  };
 
   @override
   Future<Map<String, Object?>> importNormalizedImages(

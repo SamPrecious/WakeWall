@@ -90,6 +90,8 @@ void main() {
     expect(find.text('Ask'), findsOneWidget);
     expect(find.text('Files'), findsOneWidget);
     expect(find.text('Fit mode'), findsNothing);
+    expect(find.text('Backup'), findsOneWidget);
+    expect(find.text('Restore'), findsOneWidget);
     expect(find.text('Use WakeWall'), findsOneWidget);
   });
 

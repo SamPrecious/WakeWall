@@ -118,6 +118,14 @@ class WakeWallController extends ChangeNotifier {
     await _runNative(() => _bridge.updatePhotoSource(value.name));
   }
 
+  Future<String?> backup() => _runFileAction(_bridge.backup);
+
+  Future<String?> restore() async {
+    final message = await _runFileAction(_bridge.restore, applyResult: true);
+    notifyListeners();
+    return message;
+  }
+
   Future<void> _importImages(
     Future<Map<String, Object?>> Function() picker,
   ) async {
@@ -223,6 +231,26 @@ class WakeWallController extends ChangeNotifier {
         fit: _fit.name,
       ),
     );
+  }
+
+  Future<String?> _runFileAction(
+    Future<Map<String, Object?>> Function() action, {
+    bool applyResult = false,
+  }) async {
+    try {
+      _lastNativeError = null;
+      final result = await action();
+      if (result['cancelled'] == true) return null;
+      if (applyResult) _applyConfiguration(result);
+      return result['message'] as String?;
+    } on MissingPluginException {
+      _lastNativeError = 'Backup and restore require Android.';
+    } on PlatformException catch (error) {
+      _lastNativeError = error.message ?? error.code;
+    } catch (_) {
+      _lastNativeError = 'WakeWall could not complete that file operation.';
+    }
+    return null;
   }
 
   // Rebuilds the Flutter list from Android's saved wallpaper collection.

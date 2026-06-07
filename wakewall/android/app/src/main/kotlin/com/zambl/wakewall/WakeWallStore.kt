@@ -16,11 +16,15 @@ import android.provider.OpenableColumns
 import android.provider.MediaStore
 import android.util.Size
 import org.json.JSONArray
+import org.json.JSONObject
 import java.io.ByteArrayOutputStream
 import java.io.File
 import java.io.FileInputStream
 import java.io.InputStream
 import java.util.UUID
+import java.util.zip.ZipEntry
+import java.util.zip.ZipInputStream
+import java.util.zip.ZipOutputStream
 import kotlin.math.abs
 import kotlin.math.max
 import kotlin.math.roundToInt
@@ -249,6 +253,118 @@ class WakeWallStore(context: Context) {
         }
     }
 
+    // Writes the complete wallpaper collection and its settings into one portable file.
+    fun writeBackup(output: java.io.OutputStream) {
+        migrateExternalImages()
+        val saved = wallpapers
+        val manifestWallpapers = JSONArray()
+        ZipOutputStream(output.buffered()).use { zip ->
+            saved.forEachIndexed { index, value ->
+                val source = localFile(value)
+                    ?: throw IllegalStateException("A wallpaper could not be read.")
+                val entryName = "images/$index.jpg"
+                zip.putNextEntry(ZipEntry(entryName))
+                source.inputStream().use { it.copyTo(zip) }
+                zip.closeEntry()
+                manifestWallpapers.put(
+                    JSONObject()
+                        .put("file", entryName)
+                        .put("name", displayName(value))
+                        .put("crop", JSONObject(crop(index).asMap())),
+                )
+            }
+            val manifest = JSONObject()
+                .put("format", BACKUP_FORMAT)
+                .put("version", 1)
+                .put("index", index)
+                .put("paused", paused)
+                .put("shuffle", shuffle)
+                .put("fit", fit)
+                .put("photoSource", photoSource)
+                .put("wallpapers", manifestWallpapers)
+            zip.putNextEntry(ZipEntry("manifest.json"))
+            zip.write(manifest.toString().toByteArray())
+            zip.closeEntry()
+        }
+    }
+
+    // Validates a backup fully before replacing the current wallpaper collection.
+    fun restoreBackup(input: InputStream) {
+        val restoreRoot = File(appContext.cacheDir, "restore_${UUID.randomUUID()}").apply { mkdirs() }
+        try {
+            var manifestText: String? = null
+            ZipInputStream(input.buffered()).use { zip ->
+                var entry = zip.nextEntry
+                while (entry != null) {
+                    if (!entry.isDirectory) {
+                        if (entry.name == "manifest.json") {
+                            manifestText = zip.readBytes().toString(Charsets.UTF_8)
+                        } else if (entry.name.matches(Regex("images/\\d+\\.jpg"))) {
+                            val destination = File(restoreRoot, entry.name.substringAfterLast('/'))
+                            destination.outputStream().use { zip.copyTo(it) }
+                        }
+                    }
+                    zip.closeEntry()
+                    entry = zip.nextEntry
+                }
+            }
+            val manifest = JSONObject(manifestText ?: error("This is not a WakeWall backup."))
+            require(manifest.optString("format") == BACKUP_FORMAT) { "This is not a WakeWall backup." }
+            require(manifest.optInt("version") == 1) { "This backup version is not supported." }
+            val entries = manifest.getJSONArray("wallpapers")
+            val restored = mutableListOf<RestoredWallpaper>()
+            for (position in 0 until entries.length()) {
+                val item = entries.getJSONObject(position)
+                val source = File(restoreRoot, item.getString("file").substringAfterLast('/'))
+                require(source.isFile && imageDimensions(source) != null) {
+                    "A wallpaper in this backup is damaged."
+                }
+                val crop = item.optJSONObject("crop") ?: JSONObject()
+                restored.add(
+                    RestoredWallpaper(
+                        source = source,
+                        name = item.optString("name", "Photo"),
+                        crop = CropTransform(
+                            crop.optDouble("scale", 1.0).toFloat(),
+                            crop.optDouble("offsetX", 0.0).toFloat(),
+                            crop.optDouble("offsetY", 0.0).toFloat(),
+                        ),
+                    ),
+                )
+            }
+
+            val wallpaperDirectory = File(appContext.filesDir, "wallpapers").apply { mkdirs() }
+            val newValues = restored.map { restoredWallpaper ->
+                val destination = File(wallpaperDirectory, "${UUID.randomUUID()}.jpg")
+                restoredWallpaper.source.copyTo(destination)
+                "$LOCAL_PREFIX${destination.name}".also { value ->
+                    prefs.edit()
+                        .putString("name_${value.hashCode()}", restoredWallpaper.name)
+                        .putFloat("${cropKey(value)}_scale", restoredWallpaper.crop.scale)
+                        .putFloat("${cropKey(value)}_x", restoredWallpaper.crop.offsetX)
+                        .putFloat("${cropKey(value)}_y", restoredWallpaper.crop.offsetY)
+                        .apply()
+                }
+            }
+            val oldValues = wallpapers
+            saveWallpapers(newValues)
+            prefs.edit()
+                .putInt("index", manifest.optInt("index", 0).coerceAtLeast(0))
+                .putBoolean("paused", manifest.optBoolean("paused", false))
+                .putBoolean("shuffle", manifest.optBoolean("shuffle", true))
+                .putString("fit", manifest.optString("fit", "cropToFill"))
+                .putString("photo_source", manifest.optString("photoSource", "askEveryTime"))
+                .putInt("image_format_version", 1)
+                .apply()
+            oldValues.forEach { value ->
+                localFile(value)?.delete()
+                deleteCachedPreviews(value)
+            }
+        } finally {
+            restoreRoot.deleteRecursively()
+        }
+    }
+
     fun diagnostics(): Map<String, Any> = mapOf(
         "status" to if (paused) "Paused" else "Ready",
         "current_wallpaper" to if (wallpaperCount == 0) "None" else "${index + 1} of $wallpaperCount",
@@ -291,6 +407,8 @@ class WakeWallStore(context: Context) {
     }
 
     private fun cropKey(index: Int): String = "crop_${wallpaperAt(index)?.hashCode() ?: index}"
+
+    private fun cropKey(value: String): String = "crop_${value.hashCode()}"
 
     // Creates the small preview Flutter displays without passing the full photo.
     private fun wallpaperMap(index: Int, value: String): Map<String, Any> {
@@ -687,8 +805,15 @@ class WakeWallStore(context: Context) {
         private const val LARGE_PREVIEW_EDGE = 1920f
         private const val SAMPLE_PREFIX = "sample:"
         private const val LOCAL_PREFIX = "local:"
+        private const val BACKUP_FORMAT = "com.zambl.wakewall.backup"
     }
 }
+
+data class RestoredWallpaper(
+    val source: File,
+    val name: String,
+    val crop: CropTransform,
+)
 
 data class CropTransform(
     val scale: Float,

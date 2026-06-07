@@ -39,6 +39,16 @@ class NativeWallpaperBridge {
     return result ?? const {};
   }
 
+  Future<Map<String, Object?>> backup() async {
+    final result = await _channel.invokeMapMethod<String, Object?>('backup');
+    return result ?? const {};
+  }
+
+  Future<Map<String, Object?>> restore() async {
+    final result = await _channel.invokeMapMethod<String, Object?>('restore');
+    return result ?? const {};
+  }
+
   Future<Map<String, Object?>> removeWallpaper(int index) async {
     final result = await _channel.invokeMapMethod<String, Object?>(
       'removeWallpaper',
