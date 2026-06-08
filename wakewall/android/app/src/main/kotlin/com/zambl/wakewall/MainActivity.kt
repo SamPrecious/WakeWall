@@ -10,6 +10,7 @@ import io.flutter.embedding.android.FlutterFragmentActivity
 import io.flutter.embedding.engine.FlutterEngine
 import io.flutter.plugin.common.MethodChannel
 import java.util.concurrent.Executors
+import java.util.concurrent.TimeUnit
 
 class MainActivity : FlutterFragmentActivity() {
     private val channelName = "com.zambl.wakewall/control"
@@ -41,6 +42,11 @@ class MainActivity : FlutterFragmentActivity() {
     // Connects Flutter's controls to the Android wallpaper service.
     override fun configureFlutterEngine(flutterEngine: FlutterEngine) {
         super.configureFlutterEngine(flutterEngine)
+        WakeWallStore(this).apply {
+            cleanupIncompleteImports()
+            cleanupOrphanedFiles()
+        }
+        schedulePendingRemovalCleanup()
         controlChannel = MethodChannel(flutterEngine.dartExecutor.binaryMessenger, channelName)
         controlChannel.setMethodCallHandler { call, result ->
                 when (call.method) {
@@ -104,6 +110,7 @@ class MainActivity : FlutterFragmentActivity() {
                             val store = WakeWallStore(this)
                             val removed = store.removeWallpaper(index)
                                 ?: error("WakeWall could not remove that wallpaper.")
+                            schedulePendingRemovalCleanup()
                             notifyWallpaperService()
                             configurationWithStatus(store).toMutableMap().apply {
                                 put("removedWallpaper", removed.asMap())
@@ -313,6 +320,16 @@ class MainActivity : FlutterFragmentActivity() {
         sendBroadcast(Intent(WakeWallService.ACTION_CONFIGURATION_UPDATED).setPackage(packageName))
     }
 
+    // Finishes any deletion whose Undo window expires while this process remains alive.
+    private fun schedulePendingRemovalCleanup() {
+        val context = applicationContext
+        cleanupExecutor.schedule(
+            { WakeWallStore(context).cleanupExpiredRemovals() },
+            WakeWallStore.REMOVAL_UNDO_WINDOW_MS + 250L,
+            TimeUnit.MILLISECONDS,
+        )
+    }
+
     private fun configurationWithStatus(store: WakeWallStore): Map<String, Any> =
         store.configuration() + mapOf("wakeWallActive" to isWakeWallActive())
 
@@ -353,5 +370,6 @@ class MainActivity : FlutterFragmentActivity() {
 
     companion object {
         private val backgroundExecutor = Executors.newSingleThreadExecutor()
+        private val cleanupExecutor = Executors.newSingleThreadScheduledExecutor()
     }
 }

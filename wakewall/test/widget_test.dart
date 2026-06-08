@@ -7,6 +7,7 @@ import 'package:wakewall/app.dart';
 import 'package:wakewall/controllers/wakewall_controller.dart';
 import 'package:wakewall/models/wallpaper.dart';
 import 'package:wakewall/services/native_wallpaper_bridge.dart';
+import 'package:wakewall/theme/wakewall_theme.dart';
 import 'package:wakewall/widgets/abstract_wallpaper.dart';
 
 void main() {
@@ -252,6 +253,18 @@ void main() {
     );
     expect(firstThumbnail.height, greaterThan(firstThumbnail.width * 1.5));
     expect(firstThumbnail, secondThumbnail);
+
+    final strip = find.byKey(const ValueKey('wallpaper-strip-scroll'));
+    expect(
+      tester.getSize(strip).width,
+      tester.getSize(find.byType(Scaffold)).width,
+    );
+    expect(
+      tester
+          .getTopLeft(find.byKey(const ValueKey('wallpaper-thumbnail-tidal')))
+          .dx,
+      closeTo(tester.getTopLeft(find.text('Up Next')).dx, 0.1),
+    );
   });
 
   testWidgets('large preview keeps a complete landscape source available', (
@@ -365,6 +378,11 @@ void main() {
 
     expect(find.text('Wallpaper removed'), findsOneWidget);
     expect(bridge.wallpapers.length, 3);
+    final notice = tester.widget<SnackBar>(find.byType(SnackBar));
+    expect(notice.duration, const Duration(milliseconds: 2800));
+    expect(notice.width, 340);
+    expect(notice.action?.textColor, WakeWallColors.tealStrong);
+    expect(find.byIcon(Icons.delete_outline_rounded), findsWidgets);
     ScaffoldMessenger.of(
       tester.element(find.byType(Scaffold).first),
     ).hideCurrentSnackBar(reason: SnackBarClosedReason.action);

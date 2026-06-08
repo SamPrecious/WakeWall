@@ -37,6 +37,10 @@ class WakeWallStore(context: Context) {
     private val appContext = context.applicationContext
     private val prefs = appContext.getSharedPreferences("wakewall", Context.MODE_PRIVATE)
 
+    init {
+        cleanupExpiredRemovals()
+    }
+
     var paused: Boolean
         get() = prefs.getBoolean("paused", false)
         set(value) = prefs.edit().putBoolean("paused", value).apply()
@@ -104,6 +108,7 @@ class WakeWallStore(context: Context) {
         }
         imported.forEach(updated::add)
         saveWallpapers(updated)
+        imported.forEach(::commitImport)
         prefs.edit().putInt("image_format_version", 1).apply()
         return ImportSummary(imported, uris.size - imported.size, failed)
     }
@@ -113,9 +118,7 @@ class WakeWallStore(context: Context) {
         val updated = wallpapers.toMutableList()
         val imported = mutableListOf<String>()
         images.forEach { image ->
-            val id = "${UUID.randomUUID()}.jpg"
-            val directory = File(appContext.filesDir, "wallpapers").apply { mkdirs() }
-            val destination = File(directory, id)
+            val destination = File(importStagingDirectory(), "${UUID.randomUUID()}.jpg")
             val saved = runCatching {
                 destination.writeBytes(image.bytes)
                 imageDimensions(destination) != null
@@ -124,12 +127,13 @@ class WakeWallStore(context: Context) {
                 destination.delete()
                 return@forEach
             }
-            val value = "$LOCAL_PREFIX$id"
+            val value = promoteImport(destination, ".jpg") ?: return@forEach
             prefs.edit().putString(nameKey(value), image.name).apply()
             updated.add(value)
             imported.add(value)
         }
         saveWallpapers(updated)
+        imported.forEach(::commitImport)
         prefs.edit().putInt("image_format_version", 1).apply()
         return imported
     }
@@ -139,6 +143,7 @@ class WakeWallStore(context: Context) {
         if (index !in updated.indices) return null
         val selected = wallpaperAt(this.index)
         val removed = updated.removeAt(index)
+        recordPendingRemoval(removed)
         saveWallpapers(updated)
         val nextIndex = updated.indexOf(selected).takeIf { it >= 0 }
             ?: index.coerceAtMost((updated.size - 1).coerceAtLeast(0))
@@ -154,15 +159,161 @@ class WakeWallStore(context: Context) {
         val position = removed.index.coerceIn(0, updated.size)
         updated.add(position, removed.value)
         saveWallpapers(updated)
+        cancelPendingRemoval(removed.value)
         if (removed.wasSelected) prefs.edit().putInt("index", position).apply()
     }
 
     // Permanently deletes a removed wallpaper after the Undo window closes.
     fun finalizeRemoval(value: String) {
-        if (value in wallpapers) return
+        synchronized(PENDING_REMOVAL_LOCK) {
+            if (value in wallpapers) {
+                cancelPendingRemoval(value)
+                return
+            }
+            deleteRemovalFiles(value)
+            cancelPendingRemoval(value)
+        }
+    }
+
+    // Deletes expired removals left behind when the app closed during the Undo window.
+    fun cleanupExpiredRemovals() {
+        synchronized(PENDING_REMOVAL_LOCK) {
+            val now = System.currentTimeMillis()
+            val active = wallpapers.toSet()
+            val pending = pendingRemovals()
+            var changed = false
+            pending.entries.removeAll { (value, deadline) ->
+                when {
+                    value in active -> {
+                        changed = true
+                        true
+                    }
+                    deadline <= now -> {
+                        deleteRemovalFiles(value)
+                        changed = true
+                        true
+                    }
+                    else -> false
+                }
+            }
+            if (changed) savePendingRemovals(pending)
+        }
+    }
+
+    private fun deleteRemovalFiles(value: String) {
         localFile(value)?.delete()
         deleteCachedPreviews(value)
         deleteMetadata(value)
+    }
+
+    // Removes private image files left behind by older interrupted deletions.
+    fun cleanupOrphanedFiles() {
+        synchronized(PENDING_REMOVAL_LOCK) {
+            val retained = (wallpapers + pendingRemovals().keys).toSet()
+            val retainedLocalNames = retained.mapNotNull { localFile(it)?.name }.toSet()
+            File(appContext.filesDir, "wallpapers").listFiles()?.forEach { file ->
+                if (file.isFile && file.name !in retainedLocalNames) {
+                    file.delete()
+                }
+            }
+
+            val retainedPreviewPrefixes = retained.flatMap { value ->
+                listOf("${storageKey(value)}_", "${value.hashCode()}_")
+            }
+            File(appContext.cacheDir, "wallpaper_previews").listFiles()?.forEach { file ->
+                if (
+                    file.isFile &&
+                    retainedPreviewPrefixes.none(file.name::startsWith)
+                ) {
+                    file.delete()
+                }
+            }
+        }
+    }
+
+    // Deletes imports that were interrupted before they entered the wallpaper list.
+    fun cleanupIncompleteImports() {
+        synchronized(PENDING_REMOVAL_LOCK) {
+            val active = wallpapers.toSet()
+            pendingImports().forEach { value ->
+                if (value !in active) deleteRemovalFiles(value)
+            }
+            prefs.edit().remove(PENDING_IMPORTS_KEY).commit()
+            File(appContext.filesDir, IMPORT_STAGING_DIRECTORY).deleteRecursively()
+        }
+    }
+
+    private fun recordPendingRemoval(value: String) {
+        synchronized(PENDING_REMOVAL_LOCK) {
+            val pending = pendingRemovals()
+            pending[value] = System.currentTimeMillis() + REMOVAL_UNDO_WINDOW_MS
+            savePendingRemovals(pending)
+        }
+    }
+
+    private fun cancelPendingRemoval(value: String) {
+        synchronized(PENDING_REMOVAL_LOCK) {
+            val pending = pendingRemovals()
+            if (pending.remove(value) != null) savePendingRemovals(pending)
+        }
+    }
+
+    private fun pendingRemovals(): MutableMap<String, Long> {
+        val saved = prefs.getString(PENDING_REMOVALS_KEY, null) ?: return mutableMapOf()
+        return runCatching {
+            val json = JSONObject(saved)
+            json.keys().asSequence().associateWithTo(mutableMapOf()) { json.getLong(it) }
+        }.getOrDefault(mutableMapOf())
+    }
+
+    private fun savePendingRemovals(pending: Map<String, Long>) {
+        val editor = prefs.edit()
+        if (pending.isEmpty()) {
+            editor.remove(PENDING_REMOVALS_KEY)
+        } else {
+            editor.putString(PENDING_REMOVALS_KEY, JSONObject(pending).toString())
+        }
+        editor.commit()
+    }
+
+    private fun recordPendingImport(value: String) {
+        synchronized(PENDING_REMOVAL_LOCK) {
+            val pending = pendingImports()
+            pending.add(value)
+            savePendingImports(pending)
+        }
+    }
+
+    private fun commitImport(value: String) {
+        synchronized(PENDING_REMOVAL_LOCK) {
+            val pending = pendingImports()
+            if (pending.remove(value)) savePendingImports(pending)
+        }
+    }
+
+    private fun cancelPendingImport(value: String) {
+        synchronized(PENDING_REMOVAL_LOCK) {
+            val pending = pendingImports()
+            if (pending.remove(value)) savePendingImports(pending)
+        }
+    }
+
+    private fun pendingImports(): MutableSet<String> {
+        val saved = prefs.getString(PENDING_IMPORTS_KEY, null) ?: return mutableSetOf()
+        return runCatching {
+            val json = JSONArray(saved)
+            MutableList(json.length()) { json.getString(it) }.toMutableSet()
+        }.getOrDefault(mutableSetOf())
+    }
+
+    private fun savePendingImports(pending: Set<String>) {
+        val editor = prefs.edit()
+        if (pending.isEmpty()) {
+            editor.remove(PENDING_IMPORTS_KEY)
+        } else {
+            editor.putString(PENDING_IMPORTS_KEY, JSONArray(pending.toList()).toString())
+        }
+        editor.commit()
     }
 
     fun moveWallpaper(oldIndex: Int, newIndex: Int) {
@@ -458,6 +609,7 @@ class WakeWallStore(context: Context) {
     // Moves older picker-based entries into the same reliable private storage.
     private fun migrateExternalImages() {
         var changed = false
+        val imported = mutableListOf<String>()
         val migrated = wallpapers.mapNotNull { value ->
             if (value.startsWith(SAMPLE_PREFIX)) {
                 changed = true
@@ -467,10 +619,16 @@ class WakeWallStore(context: Context) {
             } else if (value.startsWith(LOCAL_PREFIX)) {
                 value
             } else {
-                importIntoAppStorage(Uri.parse(value)).value?.also { changed = true } ?: value
+                importIntoAppStorage(Uri.parse(value)).value?.also {
+                    changed = true
+                    imported.add(it)
+                } ?: value
             }
         }
-        if (changed) saveWallpapers(migrated)
+        if (changed) {
+            saveWallpapers(migrated)
+            imported.forEach(::commitImport)
+        }
         prefs.edit().putInt("image_format_version", 1).apply()
     }
 
@@ -740,11 +898,10 @@ class WakeWallStore(context: Context) {
     // Keeps readable originals and only re-encodes unusual provider results as a fallback.
     private fun importIntoAppStorage(uri: Uri): ImportOutcome {
         val name = displayName(uri.toString())
-        val directory = File(appContext.filesDir, "wallpapers").apply { mkdirs() }
-        val originalDestination = File(directory, "${UUID.randomUUID()}.image")
+        val originalDestination = File(importStagingDirectory(), "${UUID.randomUUID()}.image")
         val original = copyReadableOriginal(uri, originalDestination)
         if (original.saved) {
-            val value = "$LOCAL_PREFIX${originalDestination.name}"
+            val value = promoteImport(originalDestination, ".image") ?: return ImportOutcome()
             prefs.edit()
                 .putString(nameKey(value), name)
                 .putString("last_import_diagnostics", "$name: ${original.diagnostics}")
@@ -753,7 +910,7 @@ class WakeWallStore(context: Context) {
         }
 
         originalDestination.delete()
-        val fallbackDestination = File(directory, "${UUID.randomUUID()}.jpg")
+        val fallbackDestination = File(importStagingDirectory(), "${UUID.randomUUID()}.jpg")
         val normalized = normalizeImage(uri, fallbackDestination)
         prefs.edit()
             .putString(
@@ -767,14 +924,30 @@ class WakeWallStore(context: Context) {
                 failure = normalized.fallbackBytes?.let { FailedImport(name, it, normalized.diagnostics) },
             )
         }
-        val value = "$LOCAL_PREFIX${fallbackDestination.name}"
+        val value = promoteImport(fallbackDestination, ".jpg") ?: return ImportOutcome()
         prefs.edit().putString(nameKey(value), name).apply()
         return ImportOutcome(value = value)
     }
 
+    // Atomically moves a completed staged image into the real wallpaper collection.
+    private fun promoteImport(staged: File, extension: String): String? {
+        val directory = File(appContext.filesDir, "wallpapers").apply { mkdirs() }
+        val destination = File(directory, "${UUID.randomUUID()}$extension")
+        val value = "$LOCAL_PREFIX${destination.name}"
+        recordPendingImport(value)
+        if (staged.renameTo(destination)) return value
+        cancelPendingImport(value)
+        staged.delete()
+        return null
+    }
+
     // Copies the provider's original bytes when Android can fully decode them.
     private fun copyReadableOriginal(uri: Uri, destination: File): PreserveResult {
-        val source = File.createTempFile("wakewall_original_", ".image", appContext.cacheDir)
+        val source = File.createTempFile(
+            "wakewall_original_",
+            ".image",
+            importStagingDirectory(),
+        )
         val diagnostics = mutableListOf<String>()
         return try {
             val accessRoutes = listOf<Pair<String, (File) -> Boolean>>(
@@ -846,7 +1019,11 @@ class WakeWallStore(context: Context) {
 
     // Tries every automatic provider access route before giving up on a selection.
     private fun normalizeImage(uri: Uri, destination: File): NormalizeResult {
-        val source = File.createTempFile("wakewall_import_", ".image", appContext.cacheDir)
+        val source = File.createTempFile(
+            "wakewall_import_",
+            ".image",
+            importStagingDirectory(),
+        )
         val diagnostics = mutableListOf<String>()
         var fallbackBytes: ByteArray? = null
         var expectedSize: Pair<Int, Int>? = null
@@ -998,7 +1175,11 @@ class WakeWallStore(context: Context) {
     // Asks the photo provider for a complete rendered image instead of raw bytes.
     private fun loadProviderTransformedImage(uri: Uri, expectedSize: Pair<Int, Int>?): Bitmap? {
         return providerRenderSizes(expectedSize).firstNotNullOfOrNull { size ->
-            val rendered = File.createTempFile("wakewall_rendered_", ".image", appContext.cacheDir)
+            val rendered = File.createTempFile(
+                "wakewall_rendered_",
+                ".image",
+                importStagingDirectory(),
+            )
             try {
                 val options = Bundle().apply {
                     putParcelable(ContentResolver.EXTRA_SIZE, Point(size.width, size.height))
@@ -1162,6 +1343,9 @@ class WakeWallStore(context: Context) {
         return localFile(value)?.inputStream() ?: appContext.contentResolver.openInputStream(Uri.parse(value))
     }
 
+    private fun importStagingDirectory(): File =
+        File(appContext.filesDir, IMPORT_STAGING_DIRECTORY).apply { mkdirs() }
+
     companion object {
         private const val MAX_IMAGE_EDGE = 6144f
         private const val VALIDATION_IMAGE_EDGE = 2048f
@@ -1180,6 +1364,11 @@ class WakeWallStore(context: Context) {
         private const val MAX_BACKUP_TOTAL_BYTES = 2L * 1024 * 1024 * 1024
         private const val MAX_FALLBACK_BYTES = 64L * 1024 * 1024
         private const val MAX_ORIGINAL_IMAGE_BYTES = 256L * 1024 * 1024
+        private const val PENDING_REMOVALS_KEY = "pending_removals"
+        private const val PENDING_IMPORTS_KEY = "pending_imports"
+        private const val IMPORT_STAGING_DIRECTORY = "wallpaper_imports"
+        const val REMOVAL_UNDO_WINDOW_MS = 3_000L
+        private val PENDING_REMOVAL_LOCK = Any()
     }
 }
 

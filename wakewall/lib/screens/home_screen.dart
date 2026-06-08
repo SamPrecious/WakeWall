@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'dart:math' as math;
 
 import 'package:auto_route/auto_route.dart';
 import 'package:flutter/material.dart';
@@ -9,6 +10,58 @@ import '../models/wallpaper.dart';
 import '../navigation/app_router.dart';
 import '../theme/wakewall_theme.dart';
 import '../widgets/abstract_wallpaper.dart';
+
+const _noticeVisibleDuration = Duration(milliseconds: 2800);
+const _noticeFadeDuration = Duration(milliseconds: 200);
+
+// Shows every short app message with the same compact Android-style layout.
+ScaffoldFeatureController<SnackBar, SnackBarClosedReason> _showWakeWallNotice(
+  BuildContext context, {
+  required String message,
+  required IconData icon,
+  Color iconColor = WakeWallColors.muted,
+  String? actionLabel,
+  VoidCallback? onAction,
+}) {
+  final messenger = ScaffoldMessenger.of(context);
+  messenger.hideCurrentSnackBar();
+  final notice = messenger.showSnackBar(
+    SnackBar(
+      behavior: SnackBarBehavior.floating,
+      width: math.min(MediaQuery.sizeOf(context).width - 56, 340.0),
+      duration: _noticeVisibleDuration,
+      padding: const EdgeInsets.symmetric(horizontal: 18, vertical: 16),
+      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(26)),
+      content: Row(
+        children: [
+          Icon(icon, color: iconColor, size: 22),
+          const SizedBox(width: 12),
+          Expanded(child: Text(message)),
+        ],
+      ),
+      action: actionLabel == null
+          ? null
+          : SnackBarAction(
+              label: actionLabel,
+              textColor: WakeWallColors.tealStrong,
+              onPressed: onAction ?? () {},
+            ),
+    ),
+    snackBarAnimationStyle: const AnimationStyle(
+      reverseDuration: _noticeFadeDuration,
+    ),
+  );
+  Timer? timeout;
+  if (actionLabel != null) {
+    timeout = Timer(_noticeVisibleDuration, () {
+      if (context.mounted) {
+        messenger.hideCurrentSnackBar(reason: SnackBarClosedReason.timeout);
+      }
+    });
+  }
+  notice.closed.whenComplete(() => timeout?.cancel());
+  return notice;
+}
 
 @RoutePage()
 class HomeScreen extends StatefulWidget {
@@ -137,6 +190,7 @@ class _HomeScreenState extends State<HomeScreen> {
                               height: collectionHeight,
                               child: _WallpaperStrip(
                                 controller: controller,
+                                horizontalPadding: horizontalPadding,
                                 onAdd: _addImages,
                                 onDragChanged: (dragging) {
                                   if (draggingWallpaper == dragging) return;
@@ -178,16 +232,14 @@ class _HomeScreenState extends State<HomeScreen> {
     if (draggingWallpaper) setState(() => draggingWallpaper = false);
     final removal = await controller.removeAt(index);
     if (removal == null || !mounted) return;
-    ScaffoldMessenger.of(context).hideCurrentSnackBar();
-    final reason = await ScaffoldMessenger.of(context)
-        .showSnackBar(
-          SnackBar(
-            behavior: SnackBarBehavior.floating,
-            content: const Text('Wallpaper removed'),
-            action: SnackBarAction(label: 'Undo', onPressed: () {}),
-          ),
-        )
-        .closed;
+    final notice = _showWakeWallNotice(
+      context,
+      message: 'Wallpaper removed',
+      icon: Icons.delete_outline_rounded,
+      actionLabel: 'Undo',
+      onAction: () {},
+    );
+    final reason = await notice.closed;
     if (reason == SnackBarClosedReason.action) {
       await controller.undoRemoval(removal);
     } else {
@@ -230,29 +282,14 @@ class _HomeScreenState extends State<HomeScreen> {
 
     if (!mounted) return;
     if (controller.lastNativeError != null) {
-      ScaffoldMessenger.of(context)
-        ..hideCurrentSnackBar()
-        ..showSnackBar(
-          SnackBar(
-            duration: const Duration(seconds: 5),
-            content: Row(
-              children: [
-                const Icon(
-                  Icons.error_outline_rounded,
-                  color: WakeWallColors.danger,
-                  size: 21,
-                ),
-                const SizedBox(width: 12),
-                Expanded(child: Text(controller.lastNativeError!)),
-              ],
-            ),
-            action: SnackBarAction(
-              label: 'Dismiss',
-              textColor: WakeWallColors.tealStrong,
-              onPressed: () {},
-            ),
-          ),
-        );
+      _showWakeWallNotice(
+        context,
+        message: controller.lastNativeError!,
+        icon: Icons.error_outline_rounded,
+        iconColor: WakeWallColors.danger,
+        actionLabel: 'Dismiss',
+        onAction: () {},
+      );
     }
     if (wasEmpty && controller.hasWallpapers) {
       await _offerWallpaperSetupIfNeeded(context, controller);
@@ -603,11 +640,13 @@ class _OverlayButton extends StatelessWidget {
 class _WallpaperStrip extends StatefulWidget {
   const _WallpaperStrip({
     required this.controller,
+    required this.horizontalPadding,
     required this.onAdd,
     required this.onDragChanged,
   });
 
   final WakeWallController controller;
+  final double horizontalPadding;
   final VoidCallback onAdd;
   final ValueChanged<bool> onDragChanged;
 
@@ -680,71 +719,89 @@ class _WallpaperStripState extends State<_WallpaperStrip> {
           ],
         ),
         Expanded(
-          child: LayoutBuilder(
-            builder: (context, constraints) {
-              final screen = MediaQuery.sizeOf(context);
-              final phoneRatio = (screen.width / screen.height).clamp(.44, .62);
-              final tileHeight = constraints.maxHeight * .84;
-              final tileWidth = constraints.maxHeight * phoneRatio;
-
-              return ListView.separated(
-                controller: scrollController,
-                scrollDirection: Axis.horizontal,
-                itemCount: controller.wallpapers.length,
-                separatorBuilder: (_, _) => const SizedBox(width: 10),
-                itemBuilder: (context, index) {
-                  final selected = index == controller.selectedIndex;
-                  final tile = _WallpaperTile(
-                    wallpaper: controller.wallpapers[index],
-                    selected: selected,
-                    width: tileWidth,
-                    height: tileHeight,
+          child: OverflowBox(
+            alignment: Alignment.center,
+            maxWidth: MediaQuery.sizeOf(context).width,
+            child: SizedBox(
+              width: MediaQuery.sizeOf(context).width,
+              child: LayoutBuilder(
+                builder: (context, constraints) {
+                  final screen = MediaQuery.sizeOf(context);
+                  final phoneRatio = (screen.width / screen.height).clamp(
+                    .44,
+                    .62,
                   );
-                  return DragTarget<int>(
-                    onWillAcceptWithDetails: (details) => details.data != index,
-                    onAcceptWithDetails: (details) {
-                      HapticFeedback.selectionClick();
-                      controller.move(details.data, index);
-                    },
-                    builder: (context, candidates, _) {
-                      final accepting = candidates.isNotEmpty;
-                      return AnimatedPadding(
-                        duration: const Duration(milliseconds: 160),
-                        padding: EdgeInsets.only(left: accepting ? 14 : 0),
-                        child: LongPressDraggable<int>(
-                          key: ValueKey('wallpaper-drag-$index'),
-                          data: index,
-                          rootOverlay: true,
-                          dragAnchorStrategy: pointerDragAnchorStrategy,
-                          onDragStarted: () {
-                            HapticFeedback.mediumImpact();
-                            widget.onDragChanged(true);
-                          },
-                          onDragUpdate: autoScroll,
-                          onDragEnd: (_) => widget.onDragChanged(false),
-                          feedback: Transform.scale(
-                            scale: 1.08,
-                            child: Material(
-                              color: Colors.transparent,
-                              elevation: 14,
-                              shadowColor: Colors.black,
-                              borderRadius: BorderRadius.circular(13),
-                              child: tile,
+                  final tileHeight = constraints.maxHeight * .84;
+                  final tileWidth = constraints.maxHeight * phoneRatio;
+
+                  return ListView.separated(
+                    key: const ValueKey('wallpaper-strip-scroll'),
+                    controller: scrollController,
+                    padding: EdgeInsets.symmetric(
+                      horizontal: widget.horizontalPadding,
+                    ),
+                    scrollDirection: Axis.horizontal,
+                    itemCount: controller.wallpapers.length,
+                    separatorBuilder: (_, _) => const SizedBox(width: 10),
+                    itemBuilder: (context, index) {
+                      final selected = index == controller.selectedIndex;
+                      final tile = _WallpaperTile(
+                        wallpaper: controller.wallpapers[index],
+                        selected: selected,
+                        width: tileWidth,
+                        height: tileHeight,
+                      );
+                      return DragTarget<int>(
+                        onWillAcceptWithDetails: (details) =>
+                            details.data != index,
+                        onAcceptWithDetails: (details) {
+                          HapticFeedback.selectionClick();
+                          controller.move(details.data, index);
+                        },
+                        builder: (context, candidates, _) {
+                          final accepting = candidates.isNotEmpty;
+                          return AnimatedPadding(
+                            duration: const Duration(milliseconds: 160),
+                            padding: EdgeInsets.only(left: accepting ? 14 : 0),
+                            child: LongPressDraggable<int>(
+                              key: ValueKey('wallpaper-drag-$index'),
+                              data: index,
+                              rootOverlay: true,
+                              dragAnchorStrategy: pointerDragAnchorStrategy,
+                              onDragStarted: () {
+                                HapticFeedback.mediumImpact();
+                                widget.onDragChanged(true);
+                              },
+                              onDragUpdate: autoScroll,
+                              onDragEnd: (_) => widget.onDragChanged(false),
+                              feedback: Transform.scale(
+                                scale: 1.08,
+                                child: Material(
+                                  color: Colors.transparent,
+                                  elevation: 14,
+                                  shadowColor: Colors.black,
+                                  borderRadius: BorderRadius.circular(13),
+                                  child: tile,
+                                ),
+                              ),
+                              childWhenDragging: Opacity(
+                                opacity: .18,
+                                child: tile,
+                              ),
+                              child: GestureDetector(
+                                onTapDown: (_) => warmPreview(index),
+                                onTap: () => controller.select(index),
+                                child: tile,
+                              ),
                             ),
-                          ),
-                          childWhenDragging: Opacity(opacity: .18, child: tile),
-                          child: GestureDetector(
-                            onTapDown: (_) => warmPreview(index),
-                            onTap: () => controller.select(index),
-                            child: tile,
-                          ),
-                        ),
+                          );
+                        },
                       );
                     },
                   );
                 },
-              );
-            },
+              ),
+            ),
           ),
         ),
       ],
@@ -983,26 +1040,16 @@ class _SettingsSheetState extends State<_SettingsSheet> {
     if (!mounted) return;
     final text = controller.lastNativeError ?? message;
     if (text != null) {
-      ScaffoldMessenger.of(context)
-        ..hideCurrentSnackBar()
-        ..showSnackBar(
-          SnackBar(
-            content: Row(
-              children: [
-                Icon(
-                  controller.lastNativeError == null
-                      ? Icons.check_circle_outline_rounded
-                      : Icons.error_outline_rounded,
-                  color: controller.lastNativeError == null
-                      ? WakeWallColors.tealStrong
-                      : WakeWallColors.danger,
-                ),
-                const SizedBox(width: 12),
-                Expanded(child: Text(text)),
-              ],
-            ),
-          ),
-        );
+      _showWakeWallNotice(
+        context,
+        message: text,
+        icon: controller.lastNativeError == null
+            ? Icons.check_circle_outline_rounded
+            : Icons.error_outline_rounded,
+        iconColor: controller.lastNativeError == null
+            ? WakeWallColors.tealStrong
+            : WakeWallColors.danger,
+      );
     }
     if (restore &&
         message != null &&
