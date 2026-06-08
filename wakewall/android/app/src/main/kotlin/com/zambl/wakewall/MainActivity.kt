@@ -140,14 +140,20 @@ class MainActivity : FlutterFragmentActivity() {
 
                     "updateCrop" -> {
                         val index = call.argument<Int>("index") ?: 0
-                        WakeWallStore(this).setCrop(
-                            index = index,
-                            scale = call.argument<Double>("scale") ?: 1.0,
-                            offsetX = call.argument<Double>("offsetX") ?: 0.0,
-                            offsetY = call.argument<Double>("offsetY") ?: 0.0,
-                        )
-                        sendBroadcast(Intent(WakeWallService.ACTION_CROP_UPDATED).setPackage(packageName))
-                        result.success(null)
+                        runInBackground(result) {
+                            val store = WakeWallStore(this)
+                            store.setCrop(
+                                index = index,
+                                scale = call.argument<Double>("scale") ?: 1.0,
+                                offsetX = call.argument<Double>("offsetX") ?: 0.0,
+                                offsetY = call.argument<Double>("offsetY") ?: 0.0,
+                            )
+                            sendBroadcast(
+                                Intent(WakeWallService.ACTION_CROP_UPDATED).setPackage(packageName)
+                            )
+                            store.wallpaperMapAt(index)
+                                ?: error("WakeWall could not update that crop.")
+                        }
                     }
 
                     "configuration" -> runInBackground(result) {

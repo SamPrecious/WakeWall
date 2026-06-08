@@ -81,14 +81,20 @@ class WakeWallController extends ChangeNotifier {
     if (index < 0 || index >= _wallpapers.length) return;
     _wallpapers[index] = _wallpapers[index].copyWith(crop: crop);
     notifyListeners();
-    await _runNative(
-      () => _bridge.updateCrop(
-        index: index,
-        scale: crop.scale,
-        offsetX: crop.offsetX,
-        offsetY: crop.offsetY,
-      ),
-    );
+    await _runNative(() async {
+      final updated = _wallpaperFromNative(
+        await _bridge.updateCrop(
+          index: index,
+          scale: crop.scale,
+          offsetX: crop.offsetX,
+          offsetY: crop.offsetY,
+        ),
+      );
+      if (updated != null) {
+        _wallpapers[index] = updated;
+        notifyListeners();
+      }
+    });
   }
 
   Future<void> next() async {
@@ -357,6 +363,7 @@ class WakeWallController extends ChangeNotifier {
       style: 0,
       uri: uri,
       thumbnail: data['thumbnail'] as Uint8List?,
+      mainPreview: data['mainPreview'] as Uint8List?,
       preview: data['preview'] as Uint8List?,
       imageWidth: (data['imageWidth'] as num?)?.toInt(),
       imageHeight: (data['imageHeight'] as num?)?.toInt(),
@@ -386,11 +393,11 @@ Map<String, Object?>? _normalizeFailedImage(Map<String, Object?> value) {
     final decoded = image.decodeImage(value['bytes']! as Uint8List);
     if (decoded == null) return null;
     var normalized = image.bakeOrientation(decoded);
-    if (normalized.width > 5120 || normalized.height > 5120) {
+    if (normalized.width > 6144 || normalized.height > 6144) {
       if (normalized.width >= normalized.height) {
-        normalized = image.copyResize(normalized, width: 5120);
+        normalized = image.copyResize(normalized, width: 6144);
       } else {
-        normalized = image.copyResize(normalized, height: 5120);
+        normalized = image.copyResize(normalized, height: 6144);
       }
     }
     return {

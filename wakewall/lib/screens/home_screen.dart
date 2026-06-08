@@ -25,8 +25,42 @@ class _HomeScreenState extends State<HomeScreen> {
 
   bool draggingWallpaper = false;
   bool importingImages = false;
+  final Set<String> warmedPreviews = {};
+  bool previewWarmupScheduled = false;
 
   WakeWallController get controller => widget.controller;
+
+  @override
+  void initState() {
+    super.initState();
+    controller.addListener(_schedulePreviewWarmup);
+    _schedulePreviewWarmup();
+  }
+
+  @override
+  void dispose() {
+    controller.removeListener(_schedulePreviewWarmup);
+    super.dispose();
+  }
+
+  // Decodes large previews before the user taps them so even detailed photos open immediately.
+  void _schedulePreviewWarmup() {
+    if (previewWarmupScheduled) return;
+    previewWarmupScheduled = true;
+    WidgetsBinding.instance.addPostFrameCallback((_) async {
+      previewWarmupScheduled = false;
+      if (!mounted) return;
+      for (final wallpaper in controller.wallpapers) {
+        final bytes = wallpaper.mainPreview;
+        if (bytes == null) continue;
+        final cacheKey = '${wallpaper.id}:${identityHashCode(bytes)}';
+        if (warmedPreviews.contains(cacheKey)) continue;
+        await precacheImage(MemoryImage(bytes), context);
+        warmedPreviews.add(cacheKey);
+        if (!mounted) return;
+      }
+    });
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -404,18 +438,14 @@ class _Preview extends StatelessWidget {
                     key: const ValueKey('populated'),
                     fit: StackFit.expand,
                     children: [
-                      AnimatedSwitcher(
-                        duration: const Duration(milliseconds: 180),
-                        switchInCurve: Curves.easeOut,
-                        switchOutCurve: Curves.easeIn,
-                        child: AbstractWallpaper(
-                          key: ValueKey(
-                            'main-preview-${controller.selectedWallpaper!.id}',
-                          ),
-                          wallpaper: controller.selectedWallpaper!,
-                          previewBytes: controller.selectedPreview,
-                          borderRadius: radius,
-                        ),
+                      AbstractWallpaper(
+                        wallpaper: controller.selectedWallpaper!,
+                        previewBytes:
+                            controller.selectedWallpaper!.mainPreview ??
+                            controller.selectedPreview,
+                        applyCrop:
+                            controller.selectedWallpaper!.mainPreview == null,
+                        borderRadius: radius,
                       ),
                       Positioned(
                         right: 14,
@@ -591,6 +621,17 @@ class _WallpaperStripState extends State<_WallpaperStrip> {
     scrollController.jumpTo(target);
   }
 
+  // Starts decoding the large preview while the user's finger is still down.
+  void warmPreview(int index) {
+    final preview = controller.wallpapers[index].preview;
+    final mainPreview = controller.wallpapers[index].mainPreview;
+    if (mainPreview != null) {
+      precacheImage(MemoryImage(mainPreview), context);
+    } else if (preview != null) {
+      precacheImage(MemoryImage(preview), context);
+    }
+  }
+
   @override
   Widget build(BuildContext context) {
     return Column(
@@ -671,6 +712,7 @@ class _WallpaperStripState extends State<_WallpaperStrip> {
                           ),
                           childWhenDragging: Opacity(opacity: .18, child: tile),
                           child: GestureDetector(
+                            onTapDown: (_) => warmPreview(index),
                             onTap: () => controller.select(index),
                             child: tile,
                           ),
@@ -705,7 +747,7 @@ class _WallpaperTile extends StatelessWidget {
   Widget build(BuildContext context) {
     return AnimatedContainer(
       key: ValueKey('wallpaper-thumbnail-${wallpaper.id}'),
-      duration: const Duration(milliseconds: 220),
+      duration: const Duration(milliseconds: 70),
       width: width,
       height: height,
       padding: const EdgeInsets.all(2.5),
@@ -721,6 +763,7 @@ class _WallpaperTile extends StatelessWidget {
       ),
       child: AbstractWallpaper(
         wallpaper: wallpaper,
+        applyCrop: wallpaper.thumbnail == null,
         borderRadius: BorderRadius.circular(10.5),
       ),
     );

@@ -79,6 +79,21 @@ void main() {
     expect(bridge.photoSource, 'files');
   });
 
+  test('saving a crop replaces its baked UI previews', () async {
+    final bridge = _FakeNativeWallpaperBridge(currentIndex: 0);
+    final controller = WakeWallController(bridge: bridge);
+
+    await controller.initialize();
+    await controller.updateCrop(
+      0,
+      const WallpaperCrop(scale: 1.5, offsetX: .1, offsetY: -.1),
+    );
+
+    expect(controller.wallpapers.first.crop.scale, 1.5);
+    expect(controller.wallpapers.first.mainPreview, bridge.croppedPreviewBytes);
+    expect(controller.wallpapers.first.thumbnail, bridge.croppedThumbnailBytes);
+  });
+
   test('controller applies a restored backup configuration', () async {
     final bridge = _FakeNativeWallpaperBridge(currentIndex: 0);
     final controller = WakeWallController(bridge: bridge);
@@ -178,6 +193,8 @@ class _FakeNativeWallpaperBridge extends NativeWallpaperBridge {
   final int failedWithoutBytes;
   String photoSource = 'askEveryTime';
   final Uint8List previewBytes = Uint8List.fromList([1, 2, 3, 4]);
+  final Uint8List croppedPreviewBytes = Uint8List.fromList([5, 6, 7, 8]);
+  final Uint8List croppedThumbnailBytes = Uint8List.fromList([9, 10]);
   late final List<Map<String, Object?>> wallpapers;
 
   @override
@@ -268,6 +285,19 @@ class _FakeNativeWallpaperBridge extends NativeWallpaperBridge {
   Future<void> updatePhotoSource(String source) async {
     photoSource = source;
   }
+
+  @override
+  Future<Map<String, Object?>> updateCrop({
+    required int index,
+    required double scale,
+    required double offsetX,
+    required double offsetY,
+  }) async => {
+    ...wallpapers[index],
+    'mainPreview': croppedPreviewBytes,
+    'thumbnail': croppedThumbnailBytes,
+    'crop': {'scale': scale, 'offsetX': offsetX, 'offsetY': offsetY},
+  };
 }
 
 class _IncrementalImportBridge extends _FakeNativeWallpaperBridge {

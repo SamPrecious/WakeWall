@@ -104,18 +104,17 @@ class NativeWallpaperBridge {
     });
   }
 
-  Future<void> updateCrop({
+  Future<Map<String, Object?>> updateCrop({
     required int index,
     required double scale,
     required double offsetX,
     required double offsetY,
   }) async {
-    await _channel.invokeMethod<void>('updateCrop', {
-      'index': index,
-      'scale': scale,
-      'offsetX': offsetX,
-      'offsetY': offsetY,
-    });
+    final result = await _channel.invokeMapMethod<String, Object?>(
+      'updateCrop',
+      {'index': index, 'scale': scale, 'offsetX': offsetX, 'offsetY': offsetY},
+    );
+    return result ?? const {};
   }
 
   Future<void> updatePhotoSource(String source) async {

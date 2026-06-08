@@ -11,6 +11,7 @@ class AbstractWallpaper extends StatelessWidget {
     this.borderRadius = BorderRadius.zero,
     this.crop,
     this.previewBytes,
+    this.applyCrop = true,
     super.key,
   });
 
@@ -18,6 +19,7 @@ class AbstractWallpaper extends StatelessWidget {
   final BorderRadius borderRadius;
   final WallpaperCrop? crop;
   final Uint8List? previewBytes;
+  final bool applyCrop;
 
   @override
   Widget build(BuildContext context) {
@@ -27,6 +29,16 @@ class AbstractWallpaper extends StatelessWidget {
         builder: (context, constraints) {
           final activeCrop = crop ?? wallpaper.crop;
           final imageBytes = previewBytes ?? wallpaper.thumbnail;
+          if (imageBytes != null && !applyCrop) {
+            return Image.memory(
+              imageBytes,
+              width: constraints.maxWidth,
+              height: constraints.maxHeight,
+              fit: BoxFit.cover,
+              gaplessPlayback: true,
+              filterQuality: FilterQuality.high,
+            );
+          }
           final useFullSource =
               imageBytes != null &&
               wallpaper.imageWidth != null &&

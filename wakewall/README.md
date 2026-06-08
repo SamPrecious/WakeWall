@@ -21,9 +21,10 @@ when the screen turns off, so it is ready for the next wake.
 - `android/.../WakeWallStore.kt`: image persistence, previews, crops, and backups
 - `android/.../MainActivity.kt`: Android pickers and Flutter platform channel
 
-WakeWall copies selected images into app-private storage as normalized JPEGs.
-The native wallpaper engine reads those files directly. Flutter receives smaller
-cached previews for the in-app UI.
+WakeWall copies readable original images into app-private storage without
+re-encoding them. Unusual provider results use a high-quality normalized JPEG
+fallback. The native wallpaper engine reads those files directly, while Flutter
+receives smaller cached previews for the in-app UI.
 
 ## Run
 

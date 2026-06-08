@@ -389,6 +389,33 @@ class WakeWallService : WallpaperService() {
         private fun drawPhoto(canvas: Canvas, index: Int, uriValue: String): Boolean {
             val width = canvas.width.toFloat()
             val height = canvas.height.toFloat()
+            val rendered = store.wallpaperRenderFile(index)?.let {
+                BitmapFactory.decodeFile(it.absolutePath)
+            }
+            if (rendered != null && rendered.width > 0 && rendered.height > 0) {
+                val renderedRatio = rendered.width.toFloat() / rendered.height
+                val canvasRatio = width / height
+                if (kotlin.math.abs(renderedRatio - canvasRatio) < .035f) {
+                    val scale = max(width / rendered.width, height / rendered.height)
+                    val drawnWidth = rendered.width * scale
+                    val drawnHeight = rendered.height * scale
+                    canvas.drawColor(Color.BLACK)
+                    canvas.drawBitmap(
+                        rendered,
+                        null,
+                        RectF(
+                            (width - drawnWidth) / 2f,
+                            (height - drawnHeight) / 2f,
+                            (width + drawnWidth) / 2f,
+                            (height + drawnHeight) / 2f,
+                        ),
+                        Paint(Paint.ANTI_ALIAS_FLAG or Paint.FILTER_BITMAP_FLAG or Paint.DITHER_FLAG),
+                    )
+                    rendered.recycle()
+                    return true
+                }
+                rendered.recycle()
+            }
             val crop = store.crop(index)
             val bitmap = decodePhoto(
                 uriValue,

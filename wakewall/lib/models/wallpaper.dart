@@ -16,6 +16,7 @@ class Wallpaper {
     required this.style,
     this.uri,
     this.thumbnail,
+    this.mainPreview,
     this.preview,
     this.imageWidth,
     this.imageHeight,
@@ -28,6 +29,7 @@ class Wallpaper {
   final int style;
   final String? uri;
   final Uint8List? thumbnail;
+  final Uint8List? mainPreview;
   final Uint8List? preview;
   final int? imageWidth;
   final int? imageHeight;
@@ -38,6 +40,7 @@ class Wallpaper {
   Wallpaper copyWith({
     WallpaperCrop? crop,
     Uint8List? thumbnail,
+    Uint8List? mainPreview,
     Uint8List? preview,
   }) => Wallpaper(
     id: id,
@@ -46,6 +49,7 @@ class Wallpaper {
     style: style,
     uri: uri,
     thumbnail: thumbnail ?? this.thumbnail,
+    mainPreview: mainPreview ?? this.mainPreview,
     preview: preview ?? this.preview,
     imageWidth: imageWidth,
     imageHeight: imageHeight,
