@@ -69,67 +69,72 @@ class _CropEditorScreenState extends State<CropEditorScreen> {
                   final width = height * phoneRatio;
 
                   return Center(
-                    child: GestureDetector(
-                      onScaleStart: (details) {
-                        gestureStartScale = crop.scale;
-                        gestureStartFocalPoint = details.focalPoint;
-                        gestureStartX = crop.offsetX;
-                        gestureStartY = crop.offsetY;
-                      },
-                      onScaleUpdate: (details) {
-                        final nextScale = (gestureStartScale * details.scale)
-                            .clamp(1.0, 4.0);
-                        final delta =
-                            details.focalPoint - gestureStartFocalPoint;
-                        final sourceWidth =
-                            wallpaper.imageWidth?.toDouble() ?? width;
-                        final sourceHeight =
-                            wallpaper.imageHeight?.toDouble() ?? height;
-                        final coverScale = math.max(
-                          width / sourceWidth,
-                          height / sourceHeight,
-                        );
-                        final maxOffsetX =
-                            (sourceWidth * coverScale * nextScale - width) /
-                            (2 * width);
-                        final maxOffsetY =
-                            (sourceHeight * coverScale * nextScale - height) /
-                            (2 * height);
-                        // Keeps the wallpaper inside the preview while it is moved.
-                        setState(() {
-                          crop = WallpaperCrop(
-                            scale: nextScale,
-                            offsetX: (gestureStartX + delta.dx / width).clamp(
-                              -maxOffsetX,
-                              maxOffsetX,
-                            ),
-                            offsetY: (gestureStartY + delta.dy / height).clamp(
-                              -maxOffsetY,
-                              maxOffsetY,
-                            ),
+                    child: Semantics(
+                      label: 'Wallpaper crop preview',
+                      hint: 'Drag to position and pinch to zoom',
+                      image: true,
+                      child: GestureDetector(
+                        onScaleStart: (details) {
+                          gestureStartScale = crop.scale;
+                          gestureStartFocalPoint = details.focalPoint;
+                          gestureStartX = crop.offsetX;
+                          gestureStartY = crop.offsetY;
+                        },
+                        onScaleUpdate: (details) {
+                          final nextScale = (gestureStartScale * details.scale)
+                              .clamp(1.0, 4.0);
+                          final delta =
+                              details.focalPoint - gestureStartFocalPoint;
+                          final sourceWidth =
+                              wallpaper.imageWidth?.toDouble() ?? width;
+                          final sourceHeight =
+                              wallpaper.imageHeight?.toDouble() ?? height;
+                          final coverScale = math.max(
+                            width / sourceWidth,
+                            height / sourceHeight,
                           );
-                        });
-                      },
-                      child: Stack(
-                        children: [
-                          SizedBox(
-                            width: width,
-                            height: height,
-                            child: AbstractWallpaper(
-                              wallpaper: wallpaper,
-                              crop: crop,
-                              previewBytes: wallpaper.preview,
-                              borderRadius: BorderRadius.circular(18),
-                            ),
-                          ),
-                          Positioned.fill(
-                            child: IgnorePointer(
-                              child: CustomPaint(
-                                painter: const _CropGridPainter(),
+                          final maxOffsetX =
+                              (sourceWidth * coverScale * nextScale - width) /
+                              (2 * width);
+                          final maxOffsetY =
+                              (sourceHeight * coverScale * nextScale - height) /
+                              (2 * height);
+                          // Keeps the wallpaper inside the preview while it is moved.
+                          setState(() {
+                            crop = WallpaperCrop(
+                              scale: nextScale,
+                              offsetX: (gestureStartX + delta.dx / width).clamp(
+                                -maxOffsetX,
+                                maxOffsetX,
                               ),
-                            ),
+                              offsetY: (gestureStartY + delta.dy / height)
+                                  .clamp(-maxOffsetY, maxOffsetY),
+                            );
+                          });
+                        },
+                        child: ExcludeSemantics(
+                          child: Stack(
+                            children: [
+                              SizedBox(
+                                width: width,
+                                height: height,
+                                child: AbstractWallpaper(
+                                  wallpaper: wallpaper,
+                                  crop: crop,
+                                  previewBytes: wallpaper.preview,
+                                  borderRadius: BorderRadius.circular(18),
+                                ),
+                              ),
+                              Positioned.fill(
+                                child: IgnorePointer(
+                                  child: CustomPaint(
+                                    painter: const _CropGridPainter(),
+                                  ),
+                                ),
+                              ),
+                            ],
                           ),
-                        ],
+                        ),
                       ),
                     ),
                   );

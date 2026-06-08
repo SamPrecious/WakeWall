@@ -62,7 +62,12 @@ void main() {
       findsOneWidget,
     );
     expect(find.text('Adding wallpapers'), findsOneWidget);
+    expect(find.text('0 of 2 processed'), findsOneWidget);
     expect(find.byType(CircularProgressIndicator), findsOneWidget);
+
+    bridge.prepareFirstImage();
+    await tester.pump();
+    expect(find.text('1 of 2 processed'), findsOneWidget);
 
     bridge.finishImport();
     await tester.pumpAndSettle();
@@ -265,6 +270,7 @@ void main() {
           .dx,
       closeTo(tester.getTopLeft(find.text('Up Next')).dx, 0.1),
     );
+    expect(find.bySemanticsLabel('Tidal, wallpaper 1 of 4'), findsOneWidget);
   });
 
   testWidgets('large preview keeps a complete landscape source available', (
@@ -521,7 +527,7 @@ class _ScrollingSettingsBridge extends _EmptyBridge {
 class _DelayedImportBridge extends _EmptyBridge {
   final Completer<Map<String, Object?>> importCompleter =
       Completer<Map<String, Object?>>();
-  VoidCallback? importStarted;
+  ValueChanged<ImportProgress>? importProgress;
 
   @override
   Future<Map<String, Object?>> configuration() async => {
@@ -533,12 +539,16 @@ class _DelayedImportBridge extends _EmptyBridge {
   Future<Map<String, Object?>> pickImages() => importCompleter.future;
 
   @override
-  void setImageImportStartedListener(VoidCallback? listener) {
-    importStarted = listener;
+  void setImageImportProgressListener(ValueChanged<ImportProgress>? listener) {
+    importProgress = listener;
   }
 
   void selectImages() {
-    importStarted?.call();
+    importProgress?.call(const ImportProgress(completed: 0, total: 2));
+  }
+
+  void prepareFirstImage() {
+    importProgress?.call(const ImportProgress(completed: 1, total: 2));
   }
 
   void finishImport() {
@@ -554,7 +564,7 @@ class _DelayedImportBridge extends _EmptyBridge {
 }
 
 class _QuickImportBridge extends _EmptyBridge {
-  VoidCallback? importStarted;
+  ValueChanged<ImportProgress>? importProgress;
 
   @override
   Future<Map<String, Object?>> configuration() async => {
@@ -564,13 +574,13 @@ class _QuickImportBridge extends _EmptyBridge {
 
   @override
   Future<Map<String, Object?>> pickImages() {
-    importStarted?.call();
+    importProgress?.call(const ImportProgress(completed: 0, total: 1));
     return configuration();
   }
 
   @override
-  void setImageImportStartedListener(VoidCallback? listener) {
-    importStarted = listener;
+  void setImageImportProgressListener(ValueChanged<ImportProgress>? listener) {
+    importProgress = listener;
   }
 }
 

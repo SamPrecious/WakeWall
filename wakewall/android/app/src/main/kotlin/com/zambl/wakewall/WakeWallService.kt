@@ -193,10 +193,11 @@ class WakeWallService : WallpaperService() {
                     preparedIndex != currentIndex &&
                     frameMatchesSurface(it)
             }
-            val nextIndex = if (prepared != null) preparedIndex else store.nextIndex(currentIndex)
             val currentFrame = currentFrameBitmap?.takeIf {
-                currentFrameIndex == nextIndex && frameMatchesSurface(it)
+                currentFrameIndex == currentIndex && frameMatchesSurface(it)
             }
+            // Keep the current frame when preparation missed the deadline instead of decoding on screen-off.
+            val nextIndex = if (prepared != null) preparedIndex else currentIndex
             val drawSucceeded = postFrame(
                 index = nextIndex,
                 bitmap = prepared ?: currentFrame,

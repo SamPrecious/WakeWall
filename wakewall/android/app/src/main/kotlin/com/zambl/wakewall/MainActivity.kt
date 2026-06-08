@@ -42,10 +42,7 @@ class MainActivity : FlutterFragmentActivity() {
     // Connects Flutter's controls to the Android wallpaper service.
     override fun configureFlutterEngine(flutterEngine: FlutterEngine) {
         super.configureFlutterEngine(flutterEngine)
-        WakeWallStore(this).apply {
-            cleanupIncompleteImports()
-            cleanupOrphanedFiles()
-        }
+        scheduleStorageCleanup()
         schedulePendingRemovalCleanup()
         controlChannel = MethodChannel(flutterEngine.dartExecutor.binaryMessenger, channelName)
         controlChannel.setMethodCallHandler { call, result ->
@@ -218,10 +215,12 @@ class MainActivity : FlutterFragmentActivity() {
             result.success(mapOf("cancelled" to true))
             return
         }
-        controlChannel.invokeMethod("imageImportStarted", null)
+        sendImportProgress(0, uris.size)
         runInBackground(result) {
             val store = WakeWallStore(this)
-            val summary = store.addImages(uris)
+            val summary = store.addImages(uris) { completed ->
+                sendImportProgress(completed, uris.size)
+            }
             notifyWallpaperService()
             store.state().toMutableMap().apply {
                 put("addedWallpapers", store.wallpaperMaps(summary.importedValues))
@@ -320,6 +319,15 @@ class MainActivity : FlutterFragmentActivity() {
         sendBroadcast(Intent(WakeWallService.ACTION_CONFIGURATION_UPDATED).setPackage(packageName))
     }
 
+    private fun sendImportProgress(completed: Int, total: Int) {
+        runOnUiThread {
+            controlChannel.invokeMethod(
+                "imageImportProgress",
+                mapOf("completed" to completed, "total" to total),
+            )
+        }
+    }
+
     // Finishes any deletion whose Undo window expires while this process remains alive.
     private fun schedulePendingRemovalCleanup() {
         val context = applicationContext
@@ -327,6 +335,16 @@ class MainActivity : FlutterFragmentActivity() {
             { WakeWallStore(context).cleanupExpiredRemovals() },
             WakeWallStore.REMOVAL_UNDO_WINDOW_MS + 250L,
             TimeUnit.MILLISECONDS,
+        )
+    }
+
+    // Lets the app load first, then tidies storage on the same serialized work queue.
+    private fun scheduleStorageCleanup() {
+        val context = applicationContext
+        cleanupExecutor.schedule(
+            { backgroundExecutor.execute { WakeWallStore(context).cleanStorage() } },
+            2,
+            TimeUnit.SECONDS,
         )
     }
 

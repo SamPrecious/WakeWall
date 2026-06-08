@@ -114,14 +114,18 @@ class WakeWallController extends ChangeNotifier {
     });
   }
 
-  Future<void> addImages({VoidCallback? onImportStarted}) async {
-    await _importImages(_bridge.pickImages, onImportStarted: onImportStarted);
+  Future<void> addImages({
+    ValueChanged<ImportProgress>? onImportProgress,
+  }) async {
+    await _importImages(_bridge.pickImages, onImportProgress: onImportProgress);
   }
 
-  Future<void> addImagesFromFiles({VoidCallback? onImportStarted}) async {
+  Future<void> addImagesFromFiles({
+    ValueChanged<ImportProgress>? onImportProgress,
+  }) async {
     await _importImages(
       _bridge.pickImagesFromFiles,
-      onImportStarted: onImportStarted,
+      onImportProgress: onImportProgress,
     );
   }
 
@@ -146,9 +150,9 @@ class WakeWallController extends ChangeNotifier {
 
   Future<void> _importImages(
     Future<Map<String, Object?>> Function() picker, {
-    VoidCallback? onImportStarted,
+    ValueChanged<ImportProgress>? onImportProgress,
   }) async {
-    _bridge.setImageImportStartedListener(onImportStarted);
+    _bridge.setImageImportProgressListener(onImportProgress);
     try {
       await _runNative(() async {
         final configuration = await picker();
@@ -158,22 +162,18 @@ class WakeWallController extends ChangeNotifier {
             configuration['failedImages'] as List<Object?>? ?? const [];
         final failedWithoutBytes =
             (configuration['failedWithoutBytesCount'] as num?)?.toInt() ?? 0;
-        final normalized = await Future.wait(
-          failedImages.map((value) {
-            final data = Map<Object?, Object?>.from(value! as Map);
-            return compute(_normalizeFailedImage, {
-              'name': data['name'] as String? ?? 'Photo',
-              'bytes': data['bytes'] as Uint8List,
-            });
-          }),
-        );
-        final recovered = normalized.whereType<Map<String, Object?>>().toList();
         var storedRecovered = 0;
-        if (recovered.isNotEmpty) {
-          final recoveredConfiguration = await _bridge.importNormalizedImages(
-            recovered,
-          );
-          storedRecovered =
+        for (final value in failedImages) {
+          final data = Map<Object?, Object?>.from(value! as Map);
+          final normalized = await compute(_normalizeFailedImage, {
+            'name': data['name'] as String? ?? 'Photo',
+            'bytes': data['bytes'] as Uint8List,
+          });
+          if (normalized == null) continue;
+          final recoveredConfiguration = await _bridge.importNormalizedImages([
+            normalized,
+          ]);
+          storedRecovered +=
               (recoveredConfiguration['normalizedImportedCount'] as num?)
                   ?.toInt() ??
               0;
@@ -189,7 +189,7 @@ class WakeWallController extends ChangeNotifier {
         notifyListeners();
       });
     } finally {
-      _bridge.setImageImportStartedListener(null);
+      _bridge.setImageImportProgressListener(null);
     }
   }
 

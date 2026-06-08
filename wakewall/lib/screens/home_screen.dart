@@ -8,6 +8,7 @@ import 'package:flutter/services.dart';
 import '../controllers/wakewall_controller.dart';
 import '../models/wallpaper.dart';
 import '../navigation/app_router.dart';
+import '../services/native_wallpaper_bridge.dart';
 import '../theme/wakewall_theme.dart';
 import '../widgets/abstract_wallpaper.dart';
 
@@ -78,6 +79,7 @@ class _HomeScreenState extends State<HomeScreen> {
 
   bool draggingWallpaper = false;
   bool importingImages = false;
+  ImportProgress? importProgress;
   final Set<String> warmedPreviews = {};
   bool previewWarmupScheduled = false;
 
@@ -206,10 +208,13 @@ class _HomeScreenState extends State<HomeScreen> {
                 ),
               ),
               if (importingImages)
-                const _OperationOverlay(
-                  overlayKey: ValueKey('import-loading-overlay'),
+                _OperationOverlay(
+                  overlayKey: const ValueKey('import-loading-overlay'),
                   title: 'Adding wallpapers',
-                  description: 'Preparing your photos...',
+                  description:
+                      importProgress == null || importProgress!.total < 1
+                      ? 'Preparing your photos...'
+                      : '${importProgress!.completed} of ${importProgress!.total} processed',
                 ),
             ],
           ),
@@ -263,7 +268,8 @@ class _HomeScreenState extends State<HomeScreen> {
     }
 
     Timer? overlayTimer;
-    void beginLoadingDelay() {
+    void updateImportProgress(ImportProgress progress) {
+      if (mounted) setState(() => importProgress = progress);
       overlayTimer ??= Timer(importOverlayDelay, () {
         if (mounted) setState(() => importingImages = true);
       });
@@ -271,13 +277,20 @@ class _HomeScreenState extends State<HomeScreen> {
 
     try {
       if (source == PhotoSource.files) {
-        await controller.addImagesFromFiles(onImportStarted: beginLoadingDelay);
+        await controller.addImagesFromFiles(
+          onImportProgress: updateImportProgress,
+        );
       } else {
-        await controller.addImages(onImportStarted: beginLoadingDelay);
+        await controller.addImages(onImportProgress: updateImportProgress);
       }
     } finally {
       overlayTimer?.cancel();
-      if (mounted && importingImages) setState(() => importingImages = false);
+      if (mounted) {
+        setState(() {
+          importingImages = false;
+          importProgress = null;
+        });
+      }
     }
 
     if (!mounted) return;
@@ -344,53 +357,60 @@ class _OperationOverlay extends StatelessWidget {
   Widget build(BuildContext context) {
     return Positioned.fill(
       key: overlayKey,
-      child: ColoredBox(
-        color: Colors.black.withValues(alpha: .58),
-        child: Center(
-          child: Container(
-            constraints: const BoxConstraints(maxWidth: 280),
-            margin: const EdgeInsets.symmetric(horizontal: 32),
-            padding: const EdgeInsets.fromLTRB(28, 26, 28, 24),
-            decoration: BoxDecoration(
-              color: WakeWallColors.surface,
-              borderRadius: BorderRadius.circular(20),
-              border: Border.all(
-                color: WakeWallColors.outline.withValues(alpha: .45),
-              ),
-              boxShadow: const [
-                BoxShadow(
-                  color: Colors.black54,
-                  blurRadius: 28,
-                  offset: Offset(0, 12),
-                ),
-              ],
-            ),
-            child: Column(
-              mainAxisSize: MainAxisSize.min,
-              children: [
-                const SizedBox(
-                  width: 38,
-                  height: 38,
-                  child: CircularProgressIndicator(
-                    strokeWidth: 3,
-                    color: WakeWallColors.tealStrong,
+      child: Semantics(
+        container: true,
+        liveRegion: true,
+        label: '$title. $description',
+        child: ExcludeSemantics(
+          child: ColoredBox(
+            color: Colors.black.withValues(alpha: .58),
+            child: Center(
+              child: Container(
+                constraints: const BoxConstraints(maxWidth: 280),
+                margin: const EdgeInsets.symmetric(horizontal: 32),
+                padding: const EdgeInsets.fromLTRB(28, 26, 28, 24),
+                decoration: BoxDecoration(
+                  color: WakeWallColors.surface,
+                  borderRadius: BorderRadius.circular(20),
+                  border: Border.all(
+                    color: WakeWallColors.outline.withValues(alpha: .45),
                   ),
+                  boxShadow: const [
+                    BoxShadow(
+                      color: Colors.black54,
+                      blurRadius: 28,
+                      offset: Offset(0, 12),
+                    ),
+                  ],
                 ),
-                const SizedBox(height: 20),
-                Text(
-                  title,
-                  textAlign: TextAlign.center,
-                  style: Theme.of(context).textTheme.titleMedium,
+                child: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    const SizedBox(
+                      width: 38,
+                      height: 38,
+                      child: CircularProgressIndicator(
+                        strokeWidth: 3,
+                        color: WakeWallColors.tealStrong,
+                      ),
+                    ),
+                    const SizedBox(height: 20),
+                    Text(
+                      title,
+                      textAlign: TextAlign.center,
+                      style: Theme.of(context).textTheme.titleMedium,
+                    ),
+                    const SizedBox(height: 6),
+                    Text(
+                      description,
+                      textAlign: TextAlign.center,
+                      style: Theme.of(context).textTheme.bodyMedium?.copyWith(
+                        color: WakeWallColors.muted,
+                      ),
+                    ),
+                  ],
                 ),
-                const SizedBox(height: 6),
-                Text(
-                  description,
-                  textAlign: TextAlign.center,
-                  style: Theme.of(
-                    context,
-                  ).textTheme.bodyMedium?.copyWith(color: WakeWallColors.muted),
-                ),
-              ],
+              ),
             ),
           ),
         ),
@@ -546,23 +566,27 @@ class _Preview extends StatelessWidget {
                     },
                     builder: (context, candidates, _) {
                       final removing = candidates.isNotEmpty;
-                      return AnimatedContainer(
-                        key: const ValueKey('wallpaper-remove-target'),
-                        duration: const Duration(milliseconds: 180),
-                        width: removing ? 96 : 82,
-                        height: removing ? 96 : 82,
-                        decoration: BoxDecoration(
-                          color: removing
-                              ? WakeWallColors.danger
-                              : WakeWallColors.raisedSurface,
-                          shape: BoxShape.circle,
-                        ),
-                        child: Icon(
-                          Icons.delete_outline_rounded,
-                          size: removing ? 42 : 36,
-                          color: removing
-                              ? WakeWallColors.ink
-                              : WakeWallColors.muted,
+                      return Semantics(
+                        label: 'Remove wallpaper',
+                        hint: 'Drop the wallpaper here to remove it',
+                        child: AnimatedContainer(
+                          key: const ValueKey('wallpaper-remove-target'),
+                          duration: const Duration(milliseconds: 180),
+                          width: removing ? 96 : 82,
+                          height: removing ? 96 : 82,
+                          decoration: BoxDecoration(
+                            color: removing
+                                ? WakeWallColors.danger
+                                : WakeWallColors.raisedSurface,
+                            shape: BoxShape.circle,
+                          ),
+                          child: Icon(
+                            Icons.delete_outline_rounded,
+                            size: removing ? 42 : 36,
+                            color: removing
+                                ? WakeWallColors.ink
+                                : WakeWallColors.muted,
+                          ),
                         ),
                       );
                     },
@@ -586,17 +610,22 @@ class _EmptyPreview extends StatelessWidget {
   Widget build(BuildContext context) {
     return Material(
       color: Colors.transparent,
-      child: InkWell(
-        key: const ValueKey('empty-add-wallpapers'),
-        onTap: onAdd,
-        borderRadius: BorderRadius.circular(22),
-        child: Center(
-          child: Text(
-            'Add Wallpapers',
-            style: Theme.of(context).textTheme.displaySmall?.copyWith(
-              color: Colors.white,
-              fontSize: 24,
-              letterSpacing: -.6,
+      child: Semantics(
+        button: true,
+        label: 'Add wallpapers',
+        hint: 'Choose photos for WakeWall',
+        child: InkWell(
+          key: const ValueKey('empty-add-wallpapers'),
+          onTap: onAdd,
+          borderRadius: BorderRadius.circular(22),
+          child: Center(
+            child: Text(
+              'Add Wallpapers',
+              style: Theme.of(context).textTheme.displaySmall?.copyWith(
+                color: Colors.white,
+                fontSize: 24,
+                letterSpacing: -.6,
+              ),
             ),
           ),
         ),
@@ -627,8 +656,8 @@ class _OverlayButton extends StatelessWidget {
           onTap: onTap,
           borderRadius: BorderRadius.circular(11),
           child: SizedBox(
-            width: 44,
-            height: 44,
+            width: 48,
+            height: 48,
             child: Icon(icon, color: const Color(0xFFE3E3E8), size: 21),
           ),
         ),
@@ -788,10 +817,18 @@ class _WallpaperStripState extends State<_WallpaperStrip> {
                                 opacity: .18,
                                 child: tile,
                               ),
-                              child: GestureDetector(
-                                onTapDown: (_) => warmPreview(index),
-                                onTap: () => controller.select(index),
-                                child: tile,
+                              child: Semantics(
+                                button: true,
+                                selected: selected,
+                                label:
+                                    '${controller.wallpapers[index].name}, wallpaper ${index + 1} of ${controller.wallpapers.length}',
+                                hint:
+                                    'Double tap to preview. Long press to reorder or remove.',
+                                child: GestureDetector(
+                                  onTapDown: (_) => warmPreview(index),
+                                  onTap: () => controller.select(index),
+                                  child: ExcludeSemantics(child: tile),
+                                ),
                               ),
                             ),
                           );
@@ -888,6 +925,7 @@ class _SettingsSheetState extends State<_SettingsSheet> {
                       const Spacer(),
                       IconButton(
                         onPressed: () => Navigator.pop(context),
+                        tooltip: 'Close settings',
                         icon: const Icon(
                           Icons.close_rounded,
                           color: Color(0xFFE3E3E8),

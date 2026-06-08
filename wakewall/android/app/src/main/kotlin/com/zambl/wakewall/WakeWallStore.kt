@@ -36,6 +36,20 @@ import kotlin.random.Random
 class WakeWallStore(context: Context) {
     private val appContext = context.applicationContext
     private val prefs = appContext.getSharedPreferences("wakewall", Context.MODE_PRIVATE)
+    private val transactionStore = WakeWallTransactionStore(prefs)
+    private val fileStore by lazy {
+        WakeWallFileStore(
+            context = appContext,
+            activeWallpapers = { wallpapers },
+            pendingRemovals = { pendingRemovals().keys },
+            pendingImports = transactionStore::pendingImports,
+            clearPendingImports = transactionStore::clearImports,
+            storageKey = ::storageKey,
+            deleteMetadata = ::deleteMetadata,
+            scrollingEnabled = { wallpaperScrolling },
+            scrollingRenderSuffix = SCROLLING_RENDER_SUFFIX,
+        )
+    }
 
     init {
         cleanupExpiredRemovals()
@@ -96,11 +110,12 @@ class WakeWallStore(context: Context) {
         photoSource = source
     }
 
-    fun addImages(uris: List<Uri>): ImportSummary {
+    fun addImages(uris: List<Uri>, onProgress: (Int) -> Unit = {}): ImportSummary {
         val updated = wallpapers.toMutableList()
         val failed = mutableListOf<FailedImport>()
-        val imported = uris.mapNotNull { uri ->
+        val imported = uris.mapIndexedNotNull { index, uri ->
             val outcome = importIntoAppStorage(uri)
+            onProgress(index + 1)
             outcome.value ?: run {
                 outcome.failure?.let(failed::add)
                 null
@@ -165,10 +180,10 @@ class WakeWallStore(context: Context) {
 
     // Permanently deletes a removed wallpaper after the Undo window closes.
     fun finalizeRemoval(value: String) {
-        synchronized(PENDING_REMOVAL_LOCK) {
+        transactionStore.locked {
             if (value in wallpapers) {
                 cancelPendingRemoval(value)
-                return
+                return@locked
             }
             deleteRemovalFiles(value)
             cancelPendingRemoval(value)
@@ -177,7 +192,7 @@ class WakeWallStore(context: Context) {
 
     // Deletes expired removals left behind when the app closed during the Undo window.
     fun cleanupExpiredRemovals() {
-        synchronized(PENDING_REMOVAL_LOCK) {
+        transactionStore.locked {
             val now = System.currentTimeMillis()
             val active = wallpapers.toSet()
             val pending = pendingRemovals()
@@ -201,119 +216,56 @@ class WakeWallStore(context: Context) {
     }
 
     private fun deleteRemovalFiles(value: String) {
-        localFile(value)?.delete()
-        deleteCachedPreviews(value)
-        deleteMetadata(value)
+        fileStore.deleteRemovalFiles(value)
     }
 
     // Removes private image files left behind by older interrupted deletions.
     fun cleanupOrphanedFiles() {
-        synchronized(PENDING_REMOVAL_LOCK) {
-            val retained = (wallpapers + pendingRemovals().keys).toSet()
-            val retainedLocalNames = retained.mapNotNull { localFile(it)?.name }.toSet()
-            File(appContext.filesDir, "wallpapers").listFiles()?.forEach { file ->
-                if (file.isFile && file.name !in retainedLocalNames) {
-                    file.delete()
-                }
-            }
-
-            val retainedPreviewPrefixes = retained.flatMap { value ->
-                listOf("${storageKey(value)}_", "${value.hashCode()}_")
-            }
-            File(appContext.cacheDir, "wallpaper_previews").listFiles()?.forEach { file ->
-                if (
-                    file.isFile &&
-                    retainedPreviewPrefixes.none(file.name::startsWith)
-                ) {
-                    file.delete()
-                }
-            }
+        transactionStore.locked {
+            fileStore.cleanupOrphanedFiles()
         }
     }
 
     // Deletes imports that were interrupted before they entered the wallpaper list.
     fun cleanupIncompleteImports() {
-        synchronized(PENDING_REMOVAL_LOCK) {
-            val active = wallpapers.toSet()
-            pendingImports().forEach { value ->
-                if (value !in active) deleteRemovalFiles(value)
-            }
-            prefs.edit().remove(PENDING_IMPORTS_KEY).commit()
-            File(appContext.filesDir, IMPORT_STAGING_DIRECTORY).deleteRecursively()
+        transactionStore.locked {
+            fileStore.cleanupIncompleteImports()
         }
+    }
+
+    // Clears files WakeWall can safely recreate or no longer references.
+    fun cleanStorage(): Long {
+        return fileStore.cleanStorage(::cleanupExpiredRemovals)
     }
 
     private fun recordPendingRemoval(value: String) {
-        synchronized(PENDING_REMOVAL_LOCK) {
-            val pending = pendingRemovals()
-            pending[value] = System.currentTimeMillis() + REMOVAL_UNDO_WINDOW_MS
-            savePendingRemovals(pending)
-        }
+        transactionStore.recordRemoval(
+            value,
+            System.currentTimeMillis() + REMOVAL_UNDO_WINDOW_MS,
+        )
     }
 
     private fun cancelPendingRemoval(value: String) {
-        synchronized(PENDING_REMOVAL_LOCK) {
-            val pending = pendingRemovals()
-            if (pending.remove(value) != null) savePendingRemovals(pending)
-        }
+        transactionStore.cancelRemoval(value)
     }
 
-    private fun pendingRemovals(): MutableMap<String, Long> {
-        val saved = prefs.getString(PENDING_REMOVALS_KEY, null) ?: return mutableMapOf()
-        return runCatching {
-            val json = JSONObject(saved)
-            json.keys().asSequence().associateWithTo(mutableMapOf()) { json.getLong(it) }
-        }.getOrDefault(mutableMapOf())
-    }
+    private fun pendingRemovals(): MutableMap<String, Long> =
+        transactionStore.pendingRemovals()
 
     private fun savePendingRemovals(pending: Map<String, Long>) {
-        val editor = prefs.edit()
-        if (pending.isEmpty()) {
-            editor.remove(PENDING_REMOVALS_KEY)
-        } else {
-            editor.putString(PENDING_REMOVALS_KEY, JSONObject(pending).toString())
-        }
-        editor.commit()
+        transactionStore.saveRemovals(pending)
     }
 
     private fun recordPendingImport(value: String) {
-        synchronized(PENDING_REMOVAL_LOCK) {
-            val pending = pendingImports()
-            pending.add(value)
-            savePendingImports(pending)
-        }
+        transactionStore.recordImport(value)
     }
 
     private fun commitImport(value: String) {
-        synchronized(PENDING_REMOVAL_LOCK) {
-            val pending = pendingImports()
-            if (pending.remove(value)) savePendingImports(pending)
-        }
+        transactionStore.finishImport(value)
     }
 
     private fun cancelPendingImport(value: String) {
-        synchronized(PENDING_REMOVAL_LOCK) {
-            val pending = pendingImports()
-            if (pending.remove(value)) savePendingImports(pending)
-        }
-    }
-
-    private fun pendingImports(): MutableSet<String> {
-        val saved = prefs.getString(PENDING_IMPORTS_KEY, null) ?: return mutableSetOf()
-        return runCatching {
-            val json = JSONArray(saved)
-            MutableList(json.length()) { json.getString(it) }.toMutableSet()
-        }.getOrDefault(mutableSetOf())
-    }
-
-    private fun savePendingImports(pending: Set<String>) {
-        val editor = prefs.edit()
-        if (pending.isEmpty()) {
-            editor.remove(PENDING_IMPORTS_KEY)
-        } else {
-            editor.putString(PENDING_IMPORTS_KEY, JSONArray(pending.toList()).toString())
-        }
-        editor.commit()
+        transactionStore.finishImport(value)
     }
 
     fun moveWallpaper(oldIndex: Int, newIndex: Int) {
@@ -856,20 +808,7 @@ class WakeWallStore(context: Context) {
     }
 
     private fun deleteCachedPreviews(value: String) {
-        val directory = File(appContext.cacheDir, "wallpaper_previews")
-        listOf(
-            "small",
-            "main",
-            "source",
-            "large",
-            "small_crop_v2",
-            "main_crop_v2",
-            WALLPAPER_RENDER_SUFFIX,
-            SCROLLING_RENDER_SUFFIX,
-        ).forEach {
-            File(directory, "${storageKey(value)}_$it.jpg").delete()
-            File(directory, "${value.hashCode()}_$it.jpg").delete()
-        }
+        fileStore.deleteCachedPreviews(value)
     }
 
     private fun imageDimensions(value: String): Pair<Int, Int>? {
@@ -1335,16 +1274,15 @@ class WakeWallStore(context: Context) {
     }
 
     fun localFile(value: String): File? {
-        if (!value.startsWith(LOCAL_PREFIX)) return null
-        return File(File(appContext.filesDir, "wallpapers"), value.removePrefix(LOCAL_PREFIX))
+        return fileStore.localFile(value)
     }
 
     fun openImage(value: String): InputStream? {
-        return localFile(value)?.inputStream() ?: appContext.contentResolver.openInputStream(Uri.parse(value))
+        return fileStore.openImage(value)
     }
 
     private fun importStagingDirectory(): File =
-        File(appContext.filesDir, IMPORT_STAGING_DIRECTORY).apply { mkdirs() }
+        fileStore.importStagingDirectory()
 
     companion object {
         private const val MAX_IMAGE_EDGE = 6144f
@@ -1364,11 +1302,7 @@ class WakeWallStore(context: Context) {
         private const val MAX_BACKUP_TOTAL_BYTES = 2L * 1024 * 1024 * 1024
         private const val MAX_FALLBACK_BYTES = 64L * 1024 * 1024
         private const val MAX_ORIGINAL_IMAGE_BYTES = 256L * 1024 * 1024
-        private const val PENDING_REMOVALS_KEY = "pending_removals"
-        private const val PENDING_IMPORTS_KEY = "pending_imports"
-        private const val IMPORT_STAGING_DIRECTORY = "wallpaper_imports"
         const val REMOVAL_UNDO_WINDOW_MS = 3_000L
-        private val PENDING_REMOVAL_LOCK = Any()
     }
 }
 

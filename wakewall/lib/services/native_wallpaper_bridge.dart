@@ -2,11 +2,11 @@ import 'package:flutter/services.dart';
 
 class NativeWallpaperBridge {
   static const _channel = MethodChannel('com.zambl.wakewall/control');
-  VoidCallback? _onImageImportStarted;
+  ValueChanged<ImportProgress>? _onImageImportProgress;
   VoidCallback? _onFileOperationStarted;
 
-  void setImageImportStartedListener(VoidCallback? listener) {
-    _onImageImportStarted = listener;
+  void setImageImportProgressListener(ValueChanged<ImportProgress>? listener) {
+    _onImageImportProgress = listener;
     if (listener != null) _installCallbackHandler();
   }
 
@@ -19,7 +19,14 @@ class NativeWallpaperBridge {
     _channel.setMethodCallHandler((call) async {
       switch (call.method) {
         case 'imageImportStarted':
-          _onImageImportStarted?.call();
+        case 'imageImportProgress':
+          final arguments = Map<Object?, Object?>.from(call.arguments as Map);
+          _onImageImportProgress?.call(
+            ImportProgress(
+              completed: (arguments['completed'] as num?)?.toInt() ?? 0,
+              total: (arguments['total'] as num?)?.toInt() ?? 0,
+            ),
+          );
         case 'fileOperationStarted':
           _onFileOperationStarted?.call();
       }
@@ -151,4 +158,11 @@ class NativeWallpaperBridge {
       await _channel.invokeMethod<Map<Object?, Object?>>('state') ?? const {},
     );
   }
+}
+
+class ImportProgress {
+  const ImportProgress({required this.completed, required this.total});
+
+  final int completed;
+  final int total;
 }
