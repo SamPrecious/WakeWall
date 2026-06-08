@@ -102,9 +102,34 @@ class MainActivity : FlutterFragmentActivity() {
                         val index = call.argument<Int>("index") ?: -1
                         runInBackground(result) {
                             val store = WakeWallStore(this)
-                            store.removeWallpaper(index)
+                            val removed = store.removeWallpaper(index)
+                                ?: error("WakeWall could not remove that wallpaper.")
                             notifyWallpaperService()
-                            store.configuration()
+                            configurationWithStatus(store).toMutableMap().apply {
+                                put("removedWallpaper", removed.asMap())
+                            }
+                        }
+                    }
+
+                    "restoreWallpaper" -> {
+                        val removed = RemovedWallpaper(
+                            value = call.argument<String>("value") ?: "",
+                            index = call.argument<Int>("index") ?: 0,
+                            wasSelected = call.argument<Boolean>("wasSelected") ?: false,
+                        )
+                        runInBackground(result) {
+                            val store = WakeWallStore(this)
+                            store.restoreWallpaper(removed)
+                            notifyWallpaperService()
+                            configurationWithStatus(store)
+                        }
+                    }
+
+                    "finalizeRemoval" -> {
+                        val value = call.argument<String>("value") ?: ""
+                        runInBackground(result) {
+                            WakeWallStore(this).finalizeRemoval(value)
+                            null
                         }
                     }
 
@@ -119,16 +144,24 @@ class MainActivity : FlutterFragmentActivity() {
                     }
 
                     "updateSettings" -> {
-                        val store = WakeWallStore(this)
-                        store.updateSettings(
-                            paused = call.argument<Boolean>("paused") ?: false,
-                            shuffle = call.argument<Boolean>("shuffle") ?: false,
-                            fit = call.argument<String>("fit") ?: "cropToFill",
-                        )
-                        sendBroadcast(
-                            Intent(WakeWallService.ACTION_CONFIGURATION_UPDATED).setPackage(packageName)
-                        )
-                        result.success(null)
+                        val paused = call.argument<Boolean>("paused") ?: false
+                        val shuffle = call.argument<Boolean>("shuffle") ?: false
+                        val fit = call.argument<String>("fit") ?: "cropToFill"
+                        val wallpaperScrolling = call.argument<Boolean>("wallpaperScrolling") ?: false
+                        if (!wallpaperScrolling) {
+                            val store = WakeWallStore(this)
+                            store.updateSettings(paused, shuffle, fit, wallpaperScrolling)
+                            notifyWallpaperService()
+                            result.success(null)
+                        } else {
+                            runInBackground(result) {
+                                val store = WakeWallStore(this)
+                                store.updateSettings(paused, shuffle, fit, wallpaperScrolling)
+                                store.prepareScrollingRenders()
+                                notifyWallpaperService()
+                                null
+                            }
+                        }
                     }
 
                     "updatePhotoSource" -> {
@@ -157,9 +190,9 @@ class MainActivity : FlutterFragmentActivity() {
                     }
 
                     "configuration" -> runInBackground(result) {
-                        WakeWallStore(this).configuration()
+                        configurationWithStatus(WakeWallStore(this))
                     }
-                    "state" -> result.success(WakeWallStore(this).state())
+                    "state" -> result.success(stateWithStatus(WakeWallStore(this)))
                     else -> result.notImplemented()
                 }
             }
@@ -279,6 +312,12 @@ class MainActivity : FlutterFragmentActivity() {
     private fun notifyWallpaperService() {
         sendBroadcast(Intent(WakeWallService.ACTION_CONFIGURATION_UPDATED).setPackage(packageName))
     }
+
+    private fun configurationWithStatus(store: WakeWallStore): Map<String, Any> =
+        store.configuration() + mapOf("wakeWallActive" to isWakeWallActive())
+
+    private fun stateWithStatus(store: WakeWallStore): Map<String, Any> =
+        store.state() + mapOf("wakeWallActive" to isWakeWallActive())
 
     // Keeps image decoding and preview loading away from Android's screen thread.
     private fun runInBackground(result: MethodChannel.Result, action: () -> Any?) {

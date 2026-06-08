@@ -118,7 +118,7 @@ class _CropEditorScreenState extends State<CropEditorScreen> {
                             child: AbstractWallpaper(
                               wallpaper: wallpaper,
                               crop: crop,
-                              previewBytes: widget.controller.selectedPreview,
+                              previewBytes: wallpaper.preview,
                               borderRadius: BorderRadius.circular(18),
                             ),
                           ),

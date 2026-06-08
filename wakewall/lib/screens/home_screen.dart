@@ -121,7 +121,7 @@ class _HomeScreenState extends State<HomeScreen> {
                                 controller: controller,
                                 maximumHeight: previewHeight,
                                 draggingWallpaper: draggingWallpaper,
-                                onRemoveWallpaper: controller.removeAt,
+                                onRemoveWallpaper: _removeWallpaper,
                                 onAdd: _addImages,
                                 onCrop: () => context.router.push(
                                   CropEditorRoute(
@@ -165,12 +165,34 @@ class _HomeScreenState extends State<HomeScreen> {
   }
 
   Future<void> _showSettings(BuildContext context) {
+    unawaited(controller.refreshState());
     return showModalBottomSheet<void>(
       context: context,
       isScrollControlled: true,
       useSafeArea: true,
       builder: (_) => _SettingsSheet(controller: controller),
     );
+  }
+
+  Future<void> _removeWallpaper(int index) async {
+    if (draggingWallpaper) setState(() => draggingWallpaper = false);
+    final removal = await controller.removeAt(index);
+    if (removal == null || !mounted) return;
+    ScaffoldMessenger.of(context).hideCurrentSnackBar();
+    final reason = await ScaffoldMessenger.of(context)
+        .showSnackBar(
+          SnackBar(
+            behavior: SnackBarBehavior.floating,
+            content: const Text('Wallpaper removed'),
+            action: SnackBarAction(label: 'Undo', onPressed: () {}),
+          ),
+        )
+        .closed;
+    if (reason == SnackBarClosedReason.action) {
+      await controller.undoRemoval(removal);
+    } else {
+      await controller.finalizeRemoval(removal);
+    }
   }
 
   Future<void> _addImages() async {
@@ -397,7 +419,7 @@ class _Preview extends StatelessWidget {
   final WakeWallController controller;
   final double maximumHeight;
   final bool draggingWallpaper;
-  final ValueChanged<int> onRemoveWallpaper;
+  final Future<void> Function(int) onRemoveWallpaper;
   final VoidCallback onAdd;
   final VoidCallback onCrop;
 
@@ -846,6 +868,13 @@ class _SettingsSheetState extends State<_SettingsSheet> {
                     value: controller.paused,
                     onChanged: controller.setPaused,
                   ),
+                  const SizedBox(height: 10),
+                  _SwitchTile(
+                    label: 'Wallpaper scrolling',
+                    description: 'Move the wallpaper as you swipe Home screens',
+                    value: controller.wallpaperScrolling,
+                    onChanged: _setWallpaperScrolling,
+                  ),
                   const SizedBox(height: 20),
                   Row(
                     children: [
@@ -872,9 +901,19 @@ class _SettingsSheetState extends State<_SettingsSheet> {
                   ),
                   const SizedBox(height: 10),
                   FilledButton.icon(
-                    onPressed: controller.openWallpaperPicker,
-                    icon: const Icon(Icons.wallpaper_rounded),
-                    label: const Text('Use WakeWall'),
+                    onPressed: controller.wakeWallActive
+                        ? null
+                        : controller.openWallpaperPicker,
+                    icon: Icon(
+                      controller.wakeWallActive
+                          ? Icons.check_circle_outline_rounded
+                          : Icons.wallpaper_rounded,
+                    ),
+                    label: Text(
+                      controller.wakeWallActive
+                          ? 'WakeWall is active'
+                          : 'Use WakeWall',
+                    ),
                   ),
                 ],
               ),
@@ -970,6 +1009,36 @@ class _SettingsSheetState extends State<_SettingsSheet> {
         controller.lastNativeError == null &&
         controller.hasWallpapers) {
       await _offerWallpaperSetupIfNeeded(context, controller);
+    }
+  }
+
+  Future<void> _setWallpaperScrolling(bool enabled) async {
+    if (!enabled) {
+      await controller.setWallpaperScrolling(false);
+      return;
+    }
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (context) => AlertDialog(
+        backgroundColor: WakeWallColors.surface,
+        title: const Text('Enable wallpaper scrolling?'),
+        content: const Text(
+          'WakeWall will prepare wider wallpaper copies. This uses more storage and may reduce performance on some devices.',
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(context, false),
+            child: const Text('Cancel'),
+          ),
+          FilledButton(
+            onPressed: () => Navigator.pop(context, true),
+            child: const Text('Enable'),
+          ),
+        ],
+      ),
+    );
+    if (confirmed == true && mounted) {
+      await controller.setWallpaperScrolling(true);
     }
   }
 

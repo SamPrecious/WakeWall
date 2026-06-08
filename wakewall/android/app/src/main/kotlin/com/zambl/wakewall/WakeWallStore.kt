@@ -49,6 +49,10 @@ class WakeWallStore(context: Context) {
         get() = prefs.getString("fit", "cropToFill") ?: "cropToFill"
         set(value) = prefs.edit().putString("fit", value).apply()
 
+    var wallpaperScrolling: Boolean
+        get() = prefs.getBoolean("wallpaper_scrolling", false)
+        set(value) = prefs.edit().putBoolean("wallpaper_scrolling", value).apply()
+
     var photoSource: String
         get() = prefs.getString("photo_source", "askEveryTime") ?: "askEveryTime"
         set(value) = prefs.edit().putString("photo_source", value).apply()
@@ -75,11 +79,12 @@ class WakeWallStore(context: Context) {
 
     fun wallpaperAt(index: Int): String? = wallpapers.getOrNull(index)
 
-    fun updateSettings(paused: Boolean, shuffle: Boolean, fit: String) {
+    fun updateSettings(paused: Boolean, shuffle: Boolean, fit: String, wallpaperScrolling: Boolean) {
         prefs.edit()
             .putBoolean("paused", paused)
             .putBoolean("shuffle", shuffle)
             .putString("fit", fit)
+            .putBoolean("wallpaper_scrolling", wallpaperScrolling)
             .apply()
     }
 
@@ -129,18 +134,35 @@ class WakeWallStore(context: Context) {
         return imported
     }
 
-    fun removeWallpaper(index: Int) {
+    fun removeWallpaper(index: Int): RemovedWallpaper? {
         val updated = wallpapers.toMutableList()
-        if (index !in updated.indices) return
+        if (index !in updated.indices) return null
         val selected = wallpaperAt(this.index)
         val removed = updated.removeAt(index)
-        localFile(removed)?.delete()
-        deleteCachedPreviews(removed)
-        deleteMetadata(removed)
         saveWallpapers(updated)
         val nextIndex = updated.indexOf(selected).takeIf { it >= 0 }
             ?: index.coerceAtMost((updated.size - 1).coerceAtLeast(0))
         prefs.edit().putInt("index", nextIndex).apply()
+        return RemovedWallpaper(removed, index, selected == removed)
+    }
+
+    // Restores a recently removed wallpaper before its source file is deleted.
+    fun restoreWallpaper(removed: RemovedWallpaper) {
+        val updated = wallpapers.toMutableList()
+        if (removed.value in updated) return
+        if (removed.value.startsWith(LOCAL_PREFIX) && localFile(removed.value)?.isFile != true) return
+        val position = removed.index.coerceIn(0, updated.size)
+        updated.add(position, removed.value)
+        saveWallpapers(updated)
+        if (removed.wasSelected) prefs.edit().putInt("index", position).apply()
+    }
+
+    // Permanently deletes a removed wallpaper after the Undo window closes.
+    fun finalizeRemoval(value: String) {
+        if (value in wallpapers) return
+        localFile(value)?.delete()
+        deleteCachedPreviews(value)
+        deleteMetadata(value)
     }
 
     fun moveWallpaper(oldIndex: Int, newIndex: Int) {
@@ -263,6 +285,7 @@ class WakeWallStore(context: Context) {
             "paused" to paused,
             "shuffle" to shuffle,
             "fit" to fit,
+            "wallpaperScrolling" to wallpaperScrolling,
             "photoSource" to photoSource,
         )
     }
@@ -312,6 +335,7 @@ class WakeWallStore(context: Context) {
                 .put("paused", paused)
                 .put("shuffle", shuffle)
                 .put("fit", fit)
+                .put("wallpaperScrolling", wallpaperScrolling)
                 .put("photoSource", photoSource)
                 .put("wallpapers", manifestWallpapers)
             zip.putNextEntry(ZipEntry("manifest.json"))
@@ -396,6 +420,7 @@ class WakeWallStore(context: Context) {
                 .putBoolean("paused", manifest.optBoolean("paused", false))
                 .putBoolean("shuffle", manifest.optBoolean("shuffle", true))
                 .putString("fit", manifest.optString("fit", "cropToFill"))
+                .putBoolean("wallpaper_scrolling", manifest.optBoolean("wallpaperScrolling", false))
                 .putString("photo_source", manifest.optString("photoSource", "askEveryTime"))
                 .putInt("image_format_version", 1)
             oldValues.forEach { value ->
@@ -494,18 +519,21 @@ class WakeWallStore(context: Context) {
 
         result["uri"] = value
         result["name"] = displayName(value)
-        imageDimensions(value)?.let { (width, height) ->
+        val sourcePreview = cachedSourcePreview(value)
+        val displayDimensions = sourcePreview?.let(::imageDimensions) ?: imageDimensions(value)
+        displayDimensions?.let { (width, height) ->
             result["imageWidth"] = width
             result["imageHeight"] = height
         }
-        ensureWallpaperRenderFile(value, index)
+        ensureWallpaperRenderFile(value, index, scrolling = false)
+        if (wallpaperScrolling) ensureWallpaperRenderFile(value, index, scrolling = true)
         croppedPreview(value, index, MAIN_PREVIEW_WIDTH, 92, "main_crop_v2")?.let {
             result["mainPreview"] = it
         }
         croppedPreview(value, index, SMALL_PREVIEW_WIDTH, 84, "small_crop_v2")?.let {
             result["thumbnail"] = it
         }
-        cachedSourcePreview(value)?.let { result["preview"] = it }
+        sourcePreview?.let { result["preview"] = it }
         return result
     }
 
@@ -570,23 +598,42 @@ class WakeWallStore(context: Context) {
     }
 
     // Creates a finished phone-sized render so the live wallpaper can switch without decoding the original.
-    private fun ensureWallpaperRenderFile(value: String, index: Int): File? {
+    private fun ensureWallpaperRenderFile(value: String, index: Int, scrolling: Boolean): File? {
         val metrics = appContext.resources.displayMetrics
-        val targetWidth = min(metrics.widthPixels, metrics.heightPixels).coerceAtLeast(1)
+        val screenWidth = min(metrics.widthPixels, metrics.heightPixels).coerceAtLeast(1)
+        val targetWidth = if (scrolling) {
+            (screenWidth * SCROLLING_WIDTH_MULTIPLIER).roundToInt()
+        } else {
+            screenWidth
+        }
         return ensureCroppedPreviewFile(
             value,
             index,
             targetWidth,
             100,
-            WALLPAPER_RENDER_SUFFIX,
+            if (scrolling) SCROLLING_RENDER_SUFFIX else WALLPAPER_RENDER_SUFFIX,
+            targetHeight = if (scrolling) {
+                max(metrics.widthPixels, metrics.heightPixels).coerceAtLeast(1)
+            } else {
+                null
+            },
         )
     }
 
-    fun wallpaperRenderFile(index: Int): File? {
+    fun wallpaperRenderFile(index: Int, scrolling: Boolean): File? {
         val value = wallpaperAt(index)?.takeUnless { it.startsWith(SAMPLE_PREFIX) } ?: return null
         val directory = File(appContext.cacheDir, "wallpaper_previews")
-        val file = File(directory, "${storageKey(value)}_$WALLPAPER_RENDER_SUFFIX.jpg")
+        val suffix = if (scrolling) SCROLLING_RENDER_SUFFIX else WALLPAPER_RENDER_SUFFIX
+        val file = File(directory, "${storageKey(value)}_$suffix.jpg")
         return file.takeIf { it.isFile && it.length() > 0 }
+            ?: ensureWallpaperRenderFile(value, index, scrolling)
+    }
+
+    // Builds wide renders before enabling scrolling so swipes never wait for image decoding.
+    fun prepareScrollingRenders() {
+        wallpapers.forEachIndexed { index, value ->
+            if (!value.startsWith(SAMPLE_PREFIX)) ensureWallpaperRenderFile(value, index, scrolling = true)
+        }
     }
 
     private fun ensureCroppedPreviewFile(
@@ -595,6 +642,7 @@ class WakeWallStore(context: Context) {
         targetWidth: Int,
         quality: Int,
         suffix: String,
+        targetHeight: Int? = null,
     ): File? {
         val directory = File(appContext.cacheDir, "wallpaper_previews").apply { mkdirs() }
         val file = File(directory, "${storageKey(value)}_$suffix.jpg")
@@ -603,19 +651,20 @@ class WakeWallStore(context: Context) {
         val metrics = appContext.resources.displayMetrics
         val screenWidth = min(metrics.widthPixels, metrics.heightPixels).coerceAtLeast(1)
         val screenHeight = max(metrics.widthPixels, metrics.heightPixels).coerceAtLeast(1)
-        val targetHeight = max(1, (targetWidth * screenHeight.toFloat() / screenWidth).roundToInt())
+        val outputHeight = targetHeight
+            ?: max(1, (targetWidth * screenHeight.toFloat() / screenWidth).roundToInt())
         val crop = crop(index)
         val source = fullAspectPreview(
             value,
-            (max(targetWidth, targetHeight) * crop.scale.coerceIn(1f, 4f))
+            (max(targetWidth, outputHeight) * crop.scale.coerceIn(1f, 4f))
                 .coerceAtMost(MAX_IMAGE_EDGE),
         ) ?: return null
-        val snapshot = Bitmap.createBitmap(targetWidth, targetHeight, Bitmap.Config.ARGB_8888)
+        val snapshot = Bitmap.createBitmap(targetWidth, outputHeight, Bitmap.Config.ARGB_8888)
         val canvas = Canvas(snapshot)
         canvas.drawColor(Color.BLACK)
 
         val width = targetWidth.toFloat()
-        val height = targetHeight.toFloat()
+        val height = outputHeight.toFloat()
         val scale = max(width / source.width, height / source.height)
         val drawnWidth = source.width * scale
         val drawnHeight = source.height * scale
@@ -658,6 +707,7 @@ class WakeWallStore(context: Context) {
             "small_crop_v2",
             "main_crop_v2",
             WALLPAPER_RENDER_SUFFIX,
+            SCROLLING_RENDER_SUFFIX,
         ).forEach {
             File(directory, "${storageKey(value)}_$it.jpg").delete()
             File(directory, "${value.hashCode()}_$it.jpg").delete()
@@ -674,6 +724,17 @@ class WakeWallStore(context: Context) {
                 null
             }
         }.getOrNull()
+    }
+
+    // Reports the dimensions of the already-oriented preview shown by Flutter.
+    private fun imageDimensions(bytes: ByteArray): Pair<Int, Int>? {
+        val options = BitmapFactory.Options().apply { inJustDecodeBounds = true }
+        BitmapFactory.decodeByteArray(bytes, 0, bytes.size, options)
+        return if (options.outWidth > 0 && options.outHeight > 0) {
+            options.outWidth to options.outHeight
+        } else {
+            null
+        }
     }
 
     // Keeps readable originals and only re-encodes unusual provider results as a fallback.
@@ -1108,6 +1169,8 @@ class WakeWallStore(context: Context) {
         private const val MAIN_PREVIEW_WIDTH = 720
         private const val SOURCE_PREVIEW_EDGE = 1920f
         private const val WALLPAPER_RENDER_SUFFIX = "wallpaper_crop_v1"
+        private const val SCROLLING_RENDER_SUFFIX = "wallpaper_scroll_v1"
+        const val SCROLLING_WIDTH_MULTIPLIER = 1.5f
         private const val SAMPLE_PREFIX = "sample:"
         private const val LOCAL_PREFIX = "local:"
         private const val BACKUP_FORMAT = "com.zambl.wakewall.backup"
@@ -1125,6 +1188,18 @@ data class RestoredWallpaper(
     val name: String,
     val crop: CropTransform,
 )
+
+data class RemovedWallpaper(
+    val value: String,
+    val index: Int,
+    val wasSelected: Boolean,
+) {
+    fun asMap(): Map<String, Any> = mapOf(
+        "value" to value,
+        "index" to index,
+        "wasSelected" to wasSelected,
+    )
+}
 
 data class CropTransform(
     val scale: Float,

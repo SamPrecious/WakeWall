@@ -85,6 +85,22 @@ class NativeWallpaperBridge {
     return result ?? const {};
   }
 
+  Future<Map<String, Object?>> restoreWallpaper({
+    required String value,
+    required int index,
+    required bool wasSelected,
+  }) async {
+    final result = await _channel.invokeMapMethod<String, Object?>(
+      'restoreWallpaper',
+      {'value': value, 'index': index, 'wasSelected': wasSelected},
+    );
+    return result ?? const {};
+  }
+
+  Future<void> finalizeRemoval(String value) async {
+    await _channel.invokeMethod<void>('finalizeRemoval', {'value': value});
+  }
+
   Future<void> moveWallpaper(int oldIndex, int newIndex) async {
     await _channel.invokeMethod<void>('moveWallpaper', {
       'oldIndex': oldIndex,
@@ -96,11 +112,13 @@ class NativeWallpaperBridge {
     required bool paused,
     required bool shuffle,
     required String fit,
+    required bool wallpaperScrolling,
   }) async {
     await _channel.invokeMethod<void>('updateSettings', {
       'paused': paused,
       'shuffle': shuffle,
       'fit': fit,
+      'wallpaperScrolling': wallpaperScrolling,
     });
   }
 

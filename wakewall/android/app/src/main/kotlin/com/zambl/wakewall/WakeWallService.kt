@@ -12,6 +12,7 @@ import android.graphics.ImageDecoder
 import android.graphics.LinearGradient
 import android.graphics.Paint
 import android.graphics.Path
+import android.graphics.Rect
 import android.graphics.RadialGradient
 import android.graphics.RectF
 import android.graphics.Shader
@@ -27,6 +28,7 @@ import androidx.core.content.ContextCompat
 import java.util.concurrent.Executors
 import kotlin.math.max
 import kotlin.math.min
+import kotlin.math.roundToInt
 
 class WakeWallService : WallpaperService() {
     override fun onCreateEngine(): Engine = WakeWallEngine()
@@ -48,6 +50,8 @@ class WakeWallService : WallpaperService() {
         private var preparationGeneration = 0
         private var preparingIndex = -1
         private var rebuildScheduled = false
+        private var wallpaperXOffset = .5f
+        private var scrollingEnabled = store.wallpaperScrolling
 
         private val rebuildRunner = Runnable {
             rebuildScheduled = false
@@ -66,6 +70,7 @@ class WakeWallService : WallpaperService() {
                     }
                     ACTION_CONFIGURATION_UPDATED -> {
                         currentIndex = store.index
+                        updateScrollingMode()
                         invalidateFrames()
                         scheduleRebuild()
                     }
@@ -79,6 +84,7 @@ class WakeWallService : WallpaperService() {
 
         override fun onCreate(surfaceHolder: SurfaceHolder) {
             super.onCreate(surfaceHolder)
+            setOffsetNotificationsEnabled(scrollingEnabled)
             val filter = IntentFilter().apply {
                 addAction(Intent.ACTION_SCREEN_ON)
                 addAction(Intent.ACTION_SCREEN_OFF)
@@ -111,6 +117,33 @@ class WakeWallService : WallpaperService() {
             } else if (isVisible || preparedBitmap == null) {
                 scheduleRebuild()
             }
+        }
+
+        override fun onOffsetsChanged(
+            xOffset: Float,
+            yOffset: Float,
+            xOffsetStep: Float,
+            yOffsetStep: Float,
+            xPixelOffset: Int,
+            yPixelOffset: Int,
+        ) {
+            if (!scrollingEnabled) return
+            wallpaperXOffset = xOffset.coerceIn(0f, 1f)
+            val frame = currentFrameBitmap?.takeIf {
+                currentFrameIndex == currentIndex && frameMatchesSurface(it)
+            }
+            if (frame != null && visible) {
+                postFrame(currentIndex, frame, allowHidden = false)
+            }
+        }
+
+        // Enables launcher offset callbacks only while the user has requested scrolling.
+        private fun updateScrollingMode() {
+            val enabled = store.wallpaperScrolling
+            if (scrollingEnabled == enabled) return
+            scrollingEnabled = enabled
+            wallpaperXOffset = .5f
+            setOffsetNotificationsEnabled(enabled)
         }
 
         // Detects a real display-off transition without rotating when another app covers the wallpaper.
@@ -218,7 +251,7 @@ class WakeWallService : WallpaperService() {
                 preparedIndex != currentIndex &&
                 existing != null &&
                 !existing.isRecycled &&
-                existing.width == frame.width() &&
+                existing.width == frameBufferWidth(frame.width()) &&
                 existing.height == frame.height()
             ) {
                 return
@@ -230,7 +263,7 @@ class WakeWallService : WallpaperService() {
                 preparedIndex = -1
                 return
             }
-            val width = frame.width()
+            val width = frameBufferWidth(frame.width())
             val height = frame.height()
             val reusable = existing?.takeIf {
                 !it.isRecycled &&
@@ -288,7 +321,7 @@ class WakeWallService : WallpaperService() {
             if (currentFrameIndex == currentIndex &&
                 existing != null &&
                 !existing.isRecycled &&
-                existing.width == frame.width() &&
+                existing.width == frameBufferWidth(frame.width()) &&
                 existing.height == frame.height()
             ) {
                 return existing
@@ -297,11 +330,11 @@ class WakeWallService : WallpaperService() {
             val bitmap = existing
                 ?.takeIf {
                     !it.isRecycled &&
-                        it.width == frame.width() &&
+                        it.width == frameBufferWidth(frame.width()) &&
                         it.height == frame.height()
                 }
                 ?: runCatching {
-                    Bitmap.createBitmap(frame.width(), frame.height(), Bitmap.Config.ARGB_8888)
+                    Bitmap.createBitmap(frameBufferWidth(frame.width()), frame.height(), Bitmap.Config.ARGB_8888)
                 }.getOrNull()
                 ?: return null
             drawWallpaper(Canvas(bitmap), currentIndex)
@@ -329,9 +362,16 @@ class WakeWallService : WallpaperService() {
             return !bitmap.isRecycled &&
                 frame.width() > 0 &&
                 frame.height() > 0 &&
-                bitmap.width == frame.width() &&
+                bitmap.width == frameBufferWidth(frame.width()) &&
                 bitmap.height == frame.height()
         }
+
+        private fun frameBufferWidth(surfaceWidth: Int): Int =
+            if (scrollingEnabled) {
+                (surfaceWidth * WakeWallStore.SCROLLING_WIDTH_MULTIPLIER).roundToInt()
+            } else {
+                surfaceWidth
+            }
 
         // Draws a frame to Android's wallpaper surface, including while hidden.
         private fun postFrame(
@@ -346,7 +386,7 @@ class WakeWallService : WallpaperService() {
                 canvas = lockSurfaceCanvas(useHardware = bitmap != null)
                 if (canvas != null) {
                     if (bitmap != null) {
-                        canvas.drawBitmap(bitmap, 0f, 0f, null)
+                        drawCachedFrame(canvas, bitmap)
                     } else {
                         drawWallpaper(canvas, index)
                     }
@@ -360,6 +400,23 @@ class WakeWallService : WallpaperService() {
                 }.isSuccess
                 return drewFrame && posted
             }
+        }
+
+        // Copies the visible launcher viewport from a prepared wide frame.
+        private fun drawCachedFrame(canvas: Canvas, bitmap: Bitmap) {
+            if (!scrollingEnabled || bitmap.width <= canvas.width) {
+                canvas.drawBitmap(bitmap, 0f, 0f, null)
+                return
+            }
+            val left = ((bitmap.width - canvas.width) * wallpaperXOffset)
+                .toInt()
+                .coerceIn(0, bitmap.width - canvas.width)
+            canvas.drawBitmap(
+                bitmap,
+                Rect(left, 0, left + canvas.width, bitmap.height),
+                RectF(0f, 0f, canvas.width.toFloat(), canvas.height.toFloat()),
+                null,
+            )
         }
 
         // Copies complete cached frames with the GPU when available.
@@ -389,7 +446,7 @@ class WakeWallService : WallpaperService() {
         private fun drawPhoto(canvas: Canvas, index: Int, uriValue: String): Boolean {
             val width = canvas.width.toFloat()
             val height = canvas.height.toFloat()
-            val rendered = store.wallpaperRenderFile(index)?.let {
+            val rendered = store.wallpaperRenderFile(index, scrollingEnabled)?.let {
                 BitmapFactory.decodeFile(it.absolutePath)
             }
             if (rendered != null && rendered.width > 0 && rendered.height > 0) {

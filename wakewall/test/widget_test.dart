@@ -132,6 +132,45 @@ void main() {
     expect(find.text('Restore'), findsOneWidget);
     expect(find.text('Use WakeWall'), findsOneWidget);
     expect(find.text('Wake-event diagnostics'), findsNothing);
+    expect(find.text('Wallpaper scrolling'), findsOneWidget);
+  });
+
+  testWidgets('settings clearly reports when WakeWall is active', (
+    tester,
+  ) async {
+    final controller = WakeWallController(bridge: _ActiveBridge());
+    await tester.pumpWidget(WakeWallApp(controller: controller));
+    await tester.pumpAndSettle();
+
+    await tester.tap(find.byTooltip('Settings'));
+    await tester.pumpAndSettle();
+
+    expect(find.text('WakeWall is active'), findsOneWidget);
+    expect(find.text('Use WakeWall'), findsNothing);
+  });
+
+  testWidgets('wallpaper scrolling stays off until its warning is accepted', (
+    tester,
+  ) async {
+    final bridge = _ScrollingSettingsBridge();
+    final controller = WakeWallController(bridge: bridge);
+    await tester.pumpWidget(WakeWallApp(controller: controller));
+    await tester.pumpAndSettle();
+
+    expect(controller.wallpaperScrolling, isFalse);
+    await tester.tap(find.byTooltip('Settings'));
+    await tester.pumpAndSettle();
+    await tester.tap(find.byType(Switch).last);
+    await tester.pumpAndSettle();
+
+    expect(find.text('Enable wallpaper scrolling?'), findsOneWidget);
+    expect(controller.wallpaperScrolling, isFalse);
+    expect(bridge.wallpaperScrolling, isFalse);
+
+    await tester.tap(find.text('Enable'));
+    await tester.pumpAndSettle();
+    expect(controller.wallpaperScrolling, isTrue);
+    expect(bridge.wallpaperScrolling, isTrue);
   });
 
   testWidgets('backup progress waits until a save location is confirmed', (
@@ -245,6 +284,7 @@ void main() {
     );
 
     expect(tester.takeException(), isNull);
+    expect(tester.widget<Image>(find.byType(Image)).fit, BoxFit.cover);
   });
 
   testWidgets('holding a wallpaper reveals the remove target', (tester) async {
@@ -285,6 +325,10 @@ void main() {
     await gesture.up();
     await tester.pumpAndSettle();
     expect(bridge.wallpapers.length, 3);
+    ScaffoldMessenger.of(
+      tester.element(find.byType(Scaffold).first),
+    ).hideCurrentSnackBar(reason: SnackBarClosedReason.timeout);
+    await tester.pumpAndSettle();
 
     final firstId = bridge.wallpapers.first['sampleIndex'];
     gesture = await tester.startGesture(
@@ -298,6 +342,37 @@ void main() {
     await gesture.up();
     await tester.pumpAndSettle();
     expect(bridge.wallpapers[2]['sampleIndex'], firstId);
+  });
+
+  testWidgets('a removed wallpaper can be restored from the snackbar', (
+    tester,
+  ) async {
+    final bridge = _PopulatedBridge();
+    final controller = WakeWallController(bridge: bridge);
+    await tester.pumpWidget(WakeWallApp(controller: controller));
+    await tester.pumpAndSettle();
+
+    final gesture = await tester.startGesture(
+      tester.getCenter(find.byKey(const ValueKey('wallpaper-drag-0'))),
+    );
+    await tester.pump(const Duration(milliseconds: 650));
+    await gesture.moveTo(
+      tester.getCenter(find.byKey(const ValueKey('wallpaper-remove-target'))),
+    );
+    await tester.pump();
+    await gesture.up();
+    await tester.pump(const Duration(milliseconds: 300));
+
+    expect(find.text('Wallpaper removed'), findsOneWidget);
+    expect(bridge.wallpapers.length, 3);
+    ScaffoldMessenger.of(
+      tester.element(find.byType(Scaffold).first),
+    ).hideCurrentSnackBar(reason: SnackBarClosedReason.action);
+    await tester.pumpAndSettle();
+
+    expect(bridge.wallpapers.length, 4);
+    expect(bridge.wallpapers.first['sampleIndex'], 0);
+    expect(bridge.finalizedRemoval, isFalse);
   });
 
   testWidgets('crop editor opens and accepts a pinch gesture', (tester) async {
@@ -352,6 +427,8 @@ class _PopulatedBridge extends _EmptyBridge {
       'crop': const {'scale': 1.0, 'offsetX': 0.0, 'offsetY': 0.0},
     },
   );
+  Map<String, Object?>? removedWallpaper;
+  bool finalizedRemoval = false;
 
   @override
   Future<Map<String, Object?>> configuration() async => {
@@ -364,14 +441,62 @@ class _PopulatedBridge extends _EmptyBridge {
 
   @override
   Future<Map<String, Object?>> removeWallpaper(int index) async {
-    wallpapers.removeAt(index);
+    removedWallpaper = wallpapers.removeAt(index);
+    return {
+      ...await configuration(),
+      'removedWallpaper': {
+        'value': 'sample:$index',
+        'index': index,
+        'wasSelected': index == 0,
+      },
+    };
+  }
+
+  @override
+  Future<Map<String, Object?>> restoreWallpaper({
+    required String value,
+    required int index,
+    required bool wasSelected,
+  }) async {
+    wallpapers.insert(index, removedWallpaper!);
+    removedWallpaper = null;
     return configuration();
+  }
+
+  @override
+  Future<void> finalizeRemoval(String value) async {
+    finalizedRemoval = true;
   }
 
   @override
   Future<Map<String, Object?>> moveWallpaper(int oldIndex, int newIndex) async {
     wallpapers.insert(newIndex, wallpapers.removeAt(oldIndex));
     return configuration();
+  }
+}
+
+class _ActiveBridge extends _EmptyBridge {
+  @override
+  Future<Map<String, Object?>> configuration() async => {
+    ...await super.configuration(),
+    'wakeWallActive': true,
+  };
+
+  @override
+  Future<Map<String, Object?>> state() => configuration();
+}
+
+class _ScrollingSettingsBridge extends _EmptyBridge {
+  bool wallpaperScrolling = false;
+
+  @override
+  Future<void> updateSettings({
+    required bool paused,
+    required bool shuffle,
+    required String fit,
+    required bool wallpaperScrolling,
+  }) async {
+    this.wallpaperScrolling = wallpaperScrolling;
   }
 }
 

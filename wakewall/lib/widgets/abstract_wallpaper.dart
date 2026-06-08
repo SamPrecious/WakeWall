@@ -80,7 +80,7 @@ class AbstractWallpaper extends StatelessWidget {
                     height: drawnHeight,
                     child: Image.memory(
                       imageBytes,
-                      fit: BoxFit.fill,
+                      fit: BoxFit.cover,
                       gaplessPlayback: true,
                       filterQuality: FilterQuality.high,
                     ),

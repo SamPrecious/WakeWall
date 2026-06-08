@@ -16,6 +16,8 @@ class WakeWallController extends ChangeNotifier {
   bool _paused = false;
   RotationOrder _order = RotationOrder.shuffle;
   WallpaperFit _fit = WallpaperFit.cropToFill;
+  bool _wallpaperScrolling = false;
+  bool _wakeWallActive = false;
   PhotoSource _photoSource = PhotoSource.askEveryTime;
   String? _lastNativeError;
   Future<void>? _initialization;
@@ -26,6 +28,8 @@ class WakeWallController extends ChangeNotifier {
   bool get paused => _paused;
   RotationOrder get order => _order;
   WallpaperFit get fit => _fit;
+  bool get wallpaperScrolling => _wallpaperScrolling;
+  bool get wakeWallActive => _wakeWallActive;
   PhotoSource get photoSource => _photoSource;
   Uint8List? get selectedPreview => selectedWallpaper?.preview;
   String? get lastNativeError => _lastNativeError;
@@ -189,13 +193,44 @@ class WakeWallController extends ChangeNotifier {
     }
   }
 
-  Future<void> removeAt(int index) async {
-    if (index < 0 || index >= _wallpapers.length) return;
+  Future<WallpaperRemoval?> removeAt(int index) async {
+    if (index < 0 || index >= _wallpapers.length) return null;
+    WallpaperRemoval? removal;
     await _runNative(() async {
-      _applyConfiguration(await _bridge.removeWallpaper(index));
+      final configuration = await _bridge.removeWallpaper(index);
+      final removed = configuration['removedWallpaper'];
+      if (removed is Map) {
+        final data = Map<Object?, Object?>.from(removed);
+        final value = data['value'] as String?;
+        if (value != null) {
+          removal = WallpaperRemoval(
+            value: value,
+            index: (data['index'] as num?)?.toInt() ?? index,
+            wasSelected: data['wasSelected'] == true,
+          );
+        }
+      }
+      _applyConfiguration(configuration);
+      notifyListeners();
+    });
+    return removal;
+  }
+
+  Future<void> undoRemoval(WallpaperRemoval removal) async {
+    await _runNative(() async {
+      _applyConfiguration(
+        await _bridge.restoreWallpaper(
+          value: removal.value,
+          index: removal.index,
+          wasSelected: removal.wasSelected,
+        ),
+      );
       notifyListeners();
     });
   }
+
+  Future<void> finalizeRemoval(WallpaperRemoval removal) =>
+      _runNative(() => _bridge.finalizeRemoval(removal.value));
 
   // Reorders the list without losing which wallpaper is selected.
   Future<void> move(int oldIndex, int newIndex) async {
@@ -233,6 +268,12 @@ class WakeWallController extends ChangeNotifier {
     await _syncSettings();
   }
 
+  Future<void> setWallpaperScrolling(bool value) async {
+    _wallpaperScrolling = value;
+    notifyListeners();
+    await _syncSettings();
+  }
+
   Future<void> openWallpaperPicker() => _runNative(_bridge.openWallpaperPicker);
 
   Future<bool> claimWallpaperSetupOffer() async {
@@ -251,6 +292,7 @@ class WakeWallController extends ChangeNotifier {
         paused: _paused,
         shuffle: _order == RotationOrder.shuffle,
         fit: _fit.name,
+        wallpaperScrolling: _wallpaperScrolling,
       ),
     );
   }
@@ -293,6 +335,10 @@ class WakeWallController extends ChangeNotifier {
           ? WallpaperFit.fitEntireImage
           : WallpaperFit.cropToFill;
     }
+    _wallpaperScrolling =
+        configuration['wallpaperScrolling'] as bool? ?? _wallpaperScrolling;
+    _wakeWallActive =
+        configuration['wakeWallActive'] as bool? ?? _wakeWallActive;
     final savedSource = configuration['photoSource'] as String?;
     if (savedSource != null) {
       _photoSource = PhotoSource.values.firstWhere(
@@ -385,6 +431,18 @@ class WakeWallController extends ChangeNotifier {
       notifyListeners();
     }
   }
+}
+
+class WallpaperRemoval {
+  const WallpaperRemoval({
+    required this.value,
+    required this.index,
+    required this.wasSelected,
+  });
+
+  final String value;
+  final int index;
+  final bool wasSelected;
 }
 
 // Rewrites photos Android cannot decode into a clean, standard JPEG.
