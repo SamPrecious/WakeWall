@@ -192,7 +192,11 @@ class MainActivity : FlutterFragmentActivity() {
 
                     "deleteAlbum" -> runInBackground(result) {
                         val store = WakeWallStore(this)
-                        store.deleteAlbum(call.argument<String>("id") ?: "")
+                        store.deleteAlbum(
+                            id = call.argument<String>("id") ?: "",
+                            deleteExclusiveWallpapers =
+                                call.argument<Boolean>("deleteExclusiveWallpapers") ?: false,
+                        )
                         notifyWallpaperService()
                         configurationWithStatus(store)
                     }

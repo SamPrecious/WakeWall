@@ -150,8 +150,15 @@ class WakeWallController extends ChangeNotifier {
   Future<void> renameAlbum(String id, String name) =>
       _applyNativeConfiguration(() => _bridge.renameAlbum(id, name));
 
-  Future<void> deleteAlbum(String id) =>
-      _applyNativeConfiguration(() => _bridge.deleteAlbum(id));
+  Future<void> deleteAlbum(
+    String id, {
+    required bool deleteExclusiveWallpapers,
+  }) => _applyNativeConfiguration(
+    () => _bridge.deleteAlbum(
+      id,
+      deleteExclusiveWallpapers: deleteExclusiveWallpapers,
+    ),
+  );
 
   Future<void> setActiveAlbums(Set<String> ids) =>
       _applyNativeConfiguration(() => _bridge.setActiveAlbums(ids));

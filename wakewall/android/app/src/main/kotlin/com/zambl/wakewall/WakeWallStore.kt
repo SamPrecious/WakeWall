@@ -152,11 +152,38 @@ class WakeWallStore(context: Context) {
         saveAlbums(albums.map { if (it.id == id) it.copy(name = cleanName) else it })
     }
 
-    fun deleteAlbum(id: String) {
+    fun deleteAlbum(id: String, deleteExclusiveWallpapers: Boolean) {
+        val activeBeforeDeletion = activeAlbumIds
+        val currentValue = wallpaperAt(index)
+        val memberships = wallpapers.associateWith(::albumIds)
+        val otherAlbumIds = albums.mapTo(mutableSetOf()) { it.id } - id
+        val deleted = if (deleteExclusiveWallpapers) {
+            memberships.filterValues { ids ->
+                id in ids && ids.none(otherAlbumIds::contains)
+            }.keys
+        } else {
+            emptySet()
+        }
+        val retained = wallpapers.filterNot(deleted::contains)
+
         saveAlbums(albums.filterNot { it.id == id })
-        wallpapers.forEach { value -> saveAlbumIds(value, albumIds(value) - id) }
+        saveWallpapers(retained)
+        retained.forEach { value ->
+            val updatedMemberships = memberships[value].orEmpty() - id
+            if (updatedMemberships != memberships[value]) saveAlbumIds(value, updatedMemberships)
+        }
         saveDefaultImportAlbumIds(defaultImportAlbumIds - id)
-        setActiveAlbums(activeAlbumIds - id)
+        prefs.edit()
+            .putString("active_album_ids", JSONArray((activeBeforeDeletion - id).toList()).toString())
+            .apply()
+        refreshActiveWallpapers()
+        val next = activeWallpapers.indexOf(currentValue).takeIf { it >= 0 } ?: 0
+        prefs.edit().putInt("index", next).apply()
+
+        deleted.forEach {
+            cancelPendingRemoval(it)
+            deleteRemovalFiles(it)
+        }
     }
 
     fun setActiveAlbums(ids: Set<String>) {

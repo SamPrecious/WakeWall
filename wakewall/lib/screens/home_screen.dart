@@ -1055,7 +1055,6 @@ class _AlbumsSheetState extends State<_AlbumsSheet> {
             ListTile(
               leading: const Icon(Icons.delete_outline_rounded),
               title: const Text('Delete album'),
-              subtitle: const Text('Wallpapers will not be deleted'),
               onTap: () => Navigator.pop(context, 'delete'),
             ),
           ],
@@ -1071,7 +1070,32 @@ class _AlbumsSheetState extends State<_AlbumsSheet> {
       );
       if (name != null) await controller.renameAlbum(album.id, name);
     } else if (action == 'delete') {
-      await controller.deleteAlbum(album.id);
+      final deletePhotos = await showDialog<bool>(
+        context: context,
+        builder: (context) => AlertDialog(
+          title: Text('Delete ${album.name}?'),
+          content: const Text(
+            'Photos only in this album can be permanently deleted. '
+            'Photos shared with another album will always be kept.',
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.pop(context, false),
+              child: const Text('Album only'),
+            ),
+            FilledButton(
+              onPressed: () => Navigator.pop(context, true),
+              child: const Text('Album & photos'),
+            ),
+          ],
+        ),
+      );
+      if (deletePhotos != null) {
+        await controller.deleteAlbum(
+          album.id,
+          deleteExclusiveWallpapers: deletePhotos,
+        );
+      }
     }
   }
 }
@@ -1116,12 +1140,13 @@ class _AssignAlbumsSheetState extends State<_AssignAlbumsSheet> {
             ],
           ),
           const SizedBox(height: 8),
-          CheckboxListTile(
-            contentPadding: EdgeInsets.zero,
-            title: const Text('No album'),
-            value: selected.isEmpty,
-            onChanged: (_) => setState(selected.clear),
-          ),
+          if (widget.isImport)
+            CheckboxListTile(
+              contentPadding: EdgeInsets.zero,
+              title: const Text('No album'),
+              value: selected.isEmpty,
+              onChanged: (_) => setState(selected.clear),
+            ),
           for (final album in widget.controller.albums)
             CheckboxListTile(
               contentPadding: EdgeInsets.zero,
@@ -1135,7 +1160,9 @@ class _AssignAlbumsSheetState extends State<_AssignAlbumsSheet> {
             ),
           if (widget.controller.albums.isEmpty)
             Text(
-              'No albums yet. These wallpapers will remain in All wallpapers.',
+              widget.isImport
+                  ? 'No albums yet. These wallpapers will remain in All wallpapers.'
+                  : 'No albums yet.',
               style: Theme.of(
                 context,
               ).textTheme.bodyMedium?.copyWith(color: WakeWallColors.muted),

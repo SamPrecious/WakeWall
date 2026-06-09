@@ -159,9 +159,13 @@ class NativeWallpaperBridge {
       }) ??
       const {};
 
-  Future<Map<String, Object?>> deleteAlbum(String id) async =>
+  Future<Map<String, Object?>> deleteAlbum(
+    String id, {
+    required bool deleteExclusiveWallpapers,
+  }) async =>
       await _channel.invokeMapMethod<String, Object?>('deleteAlbum', {
         'id': id,
+        'deleteExclusiveWallpapers': deleteExclusiveWallpapers,
       }) ??
       const {};
 
