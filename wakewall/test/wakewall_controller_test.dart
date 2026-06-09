@@ -79,6 +79,24 @@ void main() {
     expect(bridge.photoSource, 'files');
   });
 
+  test('controller applies album filters and wallpaper memberships', () async {
+    final bridge = _AlbumBridge();
+    final controller = WakeWallController(bridge: bridge);
+
+    await controller.initialize();
+    await controller.setActiveAlbums({'dogs', 'nature'});
+    await controller.updateWallpaperAlbums(controller.wallpapers.first, {
+      'dogs',
+    });
+    await controller.setImportAlbumPreference(false, {'dogs'});
+
+    expect(controller.activeAlbumIds, {'dogs', 'nature'});
+    expect(controller.wallpapers.first.albumIds, {'dogs'});
+    expect(controller.albums.map((album) => album.name), ['Dogs', 'Nature']);
+    expect(controller.askAlbumsAfterImport, isFalse);
+    expect(controller.defaultImportAlbumIds, {'dogs'});
+  });
+
   test('saving a crop replaces its baked UI previews', () async {
     final bridge = _FakeNativeWallpaperBridge(currentIndex: 0);
     final controller = WakeWallController(bridge: bridge);
@@ -318,6 +336,52 @@ class _IncrementalImportBridge extends _FakeNativeWallpaperBridge {
       },
     ],
   };
+}
+
+class _AlbumBridge extends _FakeNativeWallpaperBridge {
+  _AlbumBridge() : super(currentIndex: 0);
+
+  Set<String> activeIds = {};
+  bool askAfterImport = true;
+  Set<String> defaultIds = {};
+
+  @override
+  Future<Map<String, Object?>> configuration() async => {
+    ...await super.configuration(),
+    'albums': const [
+      {'id': 'dogs', 'name': 'Dogs'},
+      {'id': 'nature', 'name': 'Nature'},
+    ],
+    'activeAlbumIds': activeIds.toList(),
+    'askAlbumsAfterImport': askAfterImport,
+    'defaultImportAlbumIds': defaultIds.toList(),
+  };
+
+  @override
+  Future<Map<String, Object?>> setActiveAlbums(Set<String> ids) async {
+    activeIds = ids;
+    return configuration();
+  }
+
+  @override
+  Future<Map<String, Object?>> updateWallpaperAlbums(
+    String value,
+    Set<String> ids,
+  ) async {
+    final wallpaper = wallpapers.firstWhere((item) => item['uri'] == value);
+    wallpaper['albumIds'] = ids.toList();
+    return configuration();
+  }
+
+  @override
+  Future<Map<String, Object?>> updateImportAlbumPreference(
+    bool ask,
+    Set<String> ids,
+  ) async {
+    askAfterImport = ask;
+    defaultIds = ids;
+    return configuration();
+  }
 }
 
 class _PartialStateBridge extends _FakeNativeWallpaperBridge {

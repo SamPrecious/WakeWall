@@ -109,6 +109,10 @@ void main() {
     await tester.tap(find.text('Add Wallpapers'));
     await tester.pumpAndSettle();
 
+    expect(find.text('No album'), findsOneWidget);
+    await tester.tap(find.text('Done'));
+    await tester.pumpAndSettle();
+
     expect(find.text('Set up WakeWall?'), findsOneWidget);
     expect(find.text('Not now'), findsOneWidget);
     expect(find.text('Set wallpaper'), findsOneWidget);
@@ -189,6 +193,7 @@ void main() {
 
     await tester.tap(find.byTooltip('Settings'));
     await tester.pumpAndSettle();
+    await tester.ensureVisible(find.text('Backup'));
     await tester.tap(find.text('Backup'));
     await tester.pump(const Duration(seconds: 1));
     expect(find.byKey(const ValueKey('backup-loading-overlay')), findsNothing);
@@ -209,6 +214,7 @@ void main() {
 
     await tester.tap(find.byTooltip('Settings'));
     await tester.pumpAndSettle();
+    await tester.ensureVisible(find.text('Backup'));
     await tester.tap(find.text('Backup'));
     await tester.pump(const Duration(seconds: 1));
 
@@ -225,6 +231,7 @@ void main() {
 
     await tester.tap(find.byTooltip('Settings'));
     await tester.pumpAndSettle();
+    await tester.ensureVisible(find.text('Restore'));
     await tester.tap(find.text('Restore'));
     await tester.pumpAndSettle();
 
@@ -611,6 +618,12 @@ class _SetupPromptBridge extends _EmptyBridge {
 
   @override
   Future<bool> claimWallpaperSetupOffer() async => true;
+
+  @override
+  Future<Map<String, Object?>> updateWallpaperAlbums(
+    String value,
+    Set<String> ids,
+  ) => configuration();
 
   @override
   Future<void> openWallpaperPicker() async {

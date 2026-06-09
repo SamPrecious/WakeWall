@@ -69,6 +69,7 @@ class WakeWallService : WallpaperService() {
                         if (visible) scheduleRebuild()
                     }
                     ACTION_CONFIGURATION_UPDATED -> {
+                        store.refreshActiveWallpapers()
                         currentIndex = store.index
                         updateScrollingMode()
                         invalidateFrames()
@@ -188,16 +189,14 @@ class WakeWallService : WallpaperService() {
             handler.removeCallbacks(rebuildRunner)
             rebuildScheduled = false
 
+            val nextIndex = store.advanceForScreenOff(currentIndex)
             val prepared = preparedBitmap?.takeIf {
-                preparedIndex >= 0 &&
-                    preparedIndex != currentIndex &&
+                preparedIndex == nextIndex &&
                     frameMatchesSurface(it)
             }
             val currentFrame = currentFrameBitmap?.takeIf {
-                currentFrameIndex == currentIndex && frameMatchesSurface(it)
+                currentFrameIndex == nextIndex && frameMatchesSurface(it)
             }
-            // Keep the current frame when preparation missed the deadline instead of decoding on screen-off.
-            val nextIndex = if (prepared != null) preparedIndex else currentIndex
             val drawSucceeded = postFrame(
                 index = nextIndex,
                 bitmap = prepared ?: currentFrame,
@@ -206,8 +205,7 @@ class WakeWallService : WallpaperService() {
 
             if (prepared != null) promotePreparedFrame(nextIndex)
             currentIndex = nextIndex
-            store.commitScreenOff(
-                next = nextIndex,
+            store.recordScreenOffDraw(
                 drawSucceeded = drawSucceeded,
                 usedPreparedFrame = prepared != null,
             )
@@ -229,7 +227,7 @@ class WakeWallService : WallpaperService() {
             }
         }
 
-        // Refreshes the wallpaper and prepares the next image only while visible.
+        // Refreshes this wallpaper surface and keeps its next image ready.
         private fun redrawCurrentAndPrepare() {
             currentIndex = store.index
             val currentFrame = ensureCurrentFrame()
@@ -238,7 +236,7 @@ class WakeWallService : WallpaperService() {
                 bitmap = currentFrame,
                 allowHidden = screenOffHandled || deviceIsTurningOff(),
             )
-            if (visible) scheduleNextFramePreparation()
+            scheduleNextFramePreparation()
         }
 
         // Prepares the following wallpaper away from Android's wallpaper event thread.

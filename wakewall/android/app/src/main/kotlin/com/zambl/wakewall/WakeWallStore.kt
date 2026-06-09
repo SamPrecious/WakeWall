@@ -37,6 +37,8 @@ class WakeWallStore(context: Context) {
     private val appContext = context.applicationContext
     private val prefs = appContext.getSharedPreferences("wakewall", Context.MODE_PRIVATE)
     private val transactionStore = WakeWallTransactionStore(prefs)
+    @Volatile
+    private var activeWallpaperSnapshot: List<String>? = null
     private val fileStore by lazy {
         WakeWallFileStore(
             context = appContext,
@@ -75,6 +77,13 @@ class WakeWallStore(context: Context) {
         get() = prefs.getString("photo_source", "askEveryTime") ?: "askEveryTime"
         set(value) = prefs.edit().putString("photo_source", value).apply()
 
+    var askAlbumsAfterImport: Boolean
+        get() = prefs.getBoolean("ask_albums_after_import", true)
+        set(value) = prefs.edit().putBoolean("ask_albums_after_import", value).apply()
+
+    val defaultImportAlbumIds: Set<String>
+        get() = jsonArrayPreference("default_import_album_ids").toSet()
+
     var wallpaperSetupOffered: Boolean
         get() = prefs.getBoolean("wallpaper_setup_offered", false)
         set(value) = prefs.edit().putBoolean("wallpaper_setup_offered", value).apply()
@@ -89,13 +98,92 @@ class WakeWallStore(context: Context) {
             }.getOrDefault(emptyList())
         }
 
+    val albums: List<WallpaperAlbum>
+        get() = jsonArrayPreference("albums").mapNotNull { value ->
+            runCatching {
+                val item = JSONObject(value)
+                WallpaperAlbum(item.getString("id"), item.getString("name"))
+            }.getOrNull()
+        }
+
+    val activeAlbumIds: Set<String>
+        get() {
+            val allowed = albums.mapTo(mutableSetOf()) { it.id }
+            return jsonArrayPreference("active_album_ids").filterTo(linkedSetOf()) { it in allowed }
+        }
+
+    val activeWallpapers: List<String>
+        get() = activeWallpaperSnapshot ?: buildActiveWallpapers().also {
+            activeWallpaperSnapshot = it
+        }
+
+    private fun buildActiveWallpapers(): List<String> {
+            val selected = activeAlbumIds
+            if (selected.isEmpty()) return wallpapers
+            return wallpapers.filter { value ->
+                val memberships = albumIds(value)
+                memberships.any(selected::contains)
+            }
+    }
+
+    fun refreshActiveWallpapers() {
+        activeWallpaperSnapshot = null
+    }
+
     val wallpaperCount: Int
-        get() = wallpapers.size
+        get() = activeWallpapers.size
 
     val index: Int
         get() = if (wallpaperCount == 0) 0 else prefs.getInt("index", 0).mod(wallpaperCount)
 
-    fun wallpaperAt(index: Int): String? = wallpapers.getOrNull(index)
+    fun wallpaperAt(index: Int): String? = activeWallpapers.getOrNull(index)
+
+    fun createAlbum(name: String): WallpaperAlbum {
+        val cleanName = name.trim().take(40)
+        require(cleanName.isNotEmpty()) { "Give this album a name." }
+        val album = WallpaperAlbum(UUID.randomUUID().toString(), cleanName)
+        saveAlbums(albums + album)
+        return album
+    }
+
+    fun renameAlbum(id: String, name: String) {
+        val cleanName = name.trim().take(40)
+        require(cleanName.isNotEmpty()) { "Give this album a name." }
+        saveAlbums(albums.map { if (it.id == id) it.copy(name = cleanName) else it })
+    }
+
+    fun deleteAlbum(id: String) {
+        saveAlbums(albums.filterNot { it.id == id })
+        wallpapers.forEach { value -> saveAlbumIds(value, albumIds(value) - id) }
+        saveDefaultImportAlbumIds(defaultImportAlbumIds - id)
+        setActiveAlbums(activeAlbumIds - id)
+    }
+
+    fun setActiveAlbums(ids: Set<String>) {
+        val allowed = albums.mapTo(mutableSetOf()) { it.id }
+        val selected = ids.filterTo(linkedSetOf()) { it in allowed }
+        val currentValue = wallpaperAt(index)
+        prefs.edit()
+            .putString("active_album_ids", JSONArray(selected.toList()).toString())
+            .apply()
+        refreshActiveWallpapers()
+        val next = activeWallpapers.indexOf(currentValue).takeIf { it >= 0 } ?: 0
+        prefs.edit().putInt("index", next).apply()
+    }
+
+    fun updateWallpaperAlbums(value: String, ids: Set<String>) {
+        require(value in wallpapers) { "That wallpaper no longer exists." }
+        val allowed = albums.mapTo(mutableSetOf()) { it.id }
+        saveAlbumIds(value, ids.filterTo(linkedSetOf()) { it in allowed })
+        val next = activeWallpapers.indexOf(value).takeIf { it >= 0 }
+            ?: index.coerceAtMost((activeWallpapers.size - 1).coerceAtLeast(0))
+        prefs.edit().putInt("index", next).apply()
+    }
+
+    fun updateImportAlbumPreference(ask: Boolean, ids: Set<String>) {
+        askAlbumsAfterImport = ask
+        saveDefaultImportAlbumIds(ids)
+    }
 
     fun updateSettings(paused: Boolean, shuffle: Boolean, fit: String, wallpaperScrolling: Boolean) {
         prefs.edit()
@@ -155,15 +243,17 @@ class WakeWallStore(context: Context) {
 
     fun removeWallpaper(index: Int): RemovedWallpaper? {
         val updated = wallpapers.toMutableList()
-        if (index !in updated.indices) return null
+        val removed = wallpaperAt(index) ?: return null
+        val globalIndex = updated.indexOf(removed)
+        if (globalIndex !in updated.indices) return null
         val selected = wallpaperAt(this.index)
-        val removed = updated.removeAt(index)
+        updated.removeAt(globalIndex)
         recordPendingRemoval(removed)
         saveWallpapers(updated)
-        val nextIndex = updated.indexOf(selected).takeIf { it >= 0 }
-            ?: index.coerceAtMost((updated.size - 1).coerceAtLeast(0))
+        val nextIndex = activeWallpapers.indexOf(selected).takeIf { it >= 0 }
+            ?: index.coerceAtMost((activeWallpapers.size - 1).coerceAtLeast(0))
         prefs.edit().putInt("index", nextIndex).apply()
-        return RemovedWallpaper(removed, index, selected == removed)
+        return RemovedWallpaper(removed, globalIndex, selected == removed)
     }
 
     // Restores a recently removed wallpaper before its source file is deleted.
@@ -175,7 +265,9 @@ class WakeWallStore(context: Context) {
         updated.add(position, removed.value)
         saveWallpapers(updated)
         cancelPendingRemoval(removed.value)
-        if (removed.wasSelected) prefs.edit().putInt("index", position).apply()
+        if (removed.wasSelected) {
+            prefs.edit().putInt("index", activeWallpapers.indexOf(removed.value).coerceAtLeast(0)).apply()
+        }
     }
 
     // Permanently deletes a removed wallpaper after the Undo window closes.
@@ -270,11 +362,16 @@ class WakeWallStore(context: Context) {
 
     fun moveWallpaper(oldIndex: Int, newIndex: Int) {
         val updated = wallpapers.toMutableList()
-        if (oldIndex !in updated.indices || newIndex !in updated.indices || oldIndex == newIndex) return
+        val visible = activeWallpapers
+        if (oldIndex !in visible.indices || newIndex !in visible.indices || oldIndex == newIndex) return
         val selected = wallpaperAt(index)
-        updated.add(newIndex, updated.removeAt(oldIndex))
+        val moving = visible[oldIndex]
+        val target = visible[newIndex]
+        updated.remove(moving)
+        val targetIndex = updated.indexOf(target)
+        updated.add(if (oldIndex < newIndex) targetIndex + 1 else targetIndex, moving)
         saveWallpapers(updated)
-        prefs.edit().putInt("index", updated.indexOf(selected).coerceAtLeast(0)).apply()
+        prefs.edit().putInt("index", activeWallpapers.indexOf(selected).coerceAtLeast(0)).apply()
     }
 
     fun advance(trigger: String): Int {
@@ -288,9 +385,9 @@ class WakeWallStore(context: Context) {
     fun nextIndex(current: Int, allowWhenPaused: Boolean = false): Int {
         if (paused && !allowWhenPaused || wallpaperCount <= 1) return current
         return if (shuffle) {
-            var candidate = current
-            while (candidate == current) candidate = Random.nextInt(wallpaperCount)
-            candidate
+            val seed = prefs.getInt("change_count", 0).toLong() shl 32 xor current.toLong()
+            val offset = Random(seed).nextInt(wallpaperCount - 1) + 1
+            (current + offset).mod(wallpaperCount)
         } else {
             (current + 1).mod(wallpaperCount)
         }
@@ -298,7 +395,7 @@ class WakeWallStore(context: Context) {
 
     fun commitIndex(next: Int, trigger: String) {
         val current = index
-        if (next == current || next !in wallpapers.indices) return
+        if (next == current || next !in activeWallpapers.indices) return
         prefs.edit()
             .putInt("index", next)
             .putString("last_trigger", trigger)
@@ -307,11 +404,25 @@ class WakeWallStore(context: Context) {
             .apply()
     }
 
-    // Saves the new wallpaper and its screen-off result in one update.
-    fun commitScreenOff(next: Int, drawSucceeded: Boolean, usedPreparedFrame: Boolean) {
+    // Advances once even when Android has created several wallpaper engines.
+    fun advanceForScreenOff(expectedCurrent: Int): Int = transactionStore.locked {
         val current = index
+        if (current != expectedCurrent) return@locked current
+        val next = nextIndex(current)
+        if (next == current || next !in activeWallpapers.indices) return@locked current
+        prefs.edit()
+            .putInt("index", next)
+            .putString("last_trigger", "screen_off")
+            .putLong("last_change_at", System.currentTimeMillis())
+            .putInt("change_count", prefs.getInt("change_count", 0) + 1)
+            .apply()
+        next
+    }
+
+    // Records whether this wallpaper surface displayed the shared screen-off target.
+    fun recordScreenOffDraw(drawSucceeded: Boolean, usedPreparedFrame: Boolean) {
         val now = System.currentTimeMillis()
-        val editor = prefs.edit()
+        prefs.edit()
             .putString("last_event", "screen_off")
             .putLong("last_event_at", now)
             .putInt("screen_off_count", prefs.getInt("screen_off_count", 0) + 1)
@@ -327,15 +438,7 @@ class WakeWallStore(context: Context) {
                 "screen_off_prepare_${if (drawSucceeded) "success" else "failure"}_count",
                 prefs.getInt("screen_off_prepare_${if (drawSucceeded) "success" else "failure"}_count", 0) + 1,
             )
-
-        if (next != current && next in wallpapers.indices) {
-            editor
-                .putInt("index", next)
-                .putString("last_trigger", "screen_off")
-                .putLong("last_change_at", now)
-                .putInt("change_count", prefs.getInt("change_count", 0) + 1)
-        }
-        editor.apply()
+            .apply()
     }
 
     fun recordEvent(event: String) {
@@ -378,7 +481,11 @@ class WakeWallStore(context: Context) {
     fun configuration(): Map<String, Any> {
         migrateExternalImages()
         return state() + mapOf(
-            "wallpapers" to wallpapers.mapIndexed(::wallpaperMap),
+            "wallpapers" to activeWallpapers.mapIndexed(::wallpaperMap),
+            "albums" to albums.map(WallpaperAlbum::asMap),
+            "activeAlbumIds" to activeAlbumIds.toList(),
+            "askAlbumsAfterImport" to askAlbumsAfterImport,
+            "defaultImportAlbumIds" to defaultImportAlbumIds.toList(),
         )
     }
 
@@ -390,6 +497,10 @@ class WakeWallStore(context: Context) {
             "fit" to fit,
             "wallpaperScrolling" to wallpaperScrolling,
             "photoSource" to photoSource,
+            "albums" to albums.map(WallpaperAlbum::asMap),
+            "activeAlbumIds" to activeAlbumIds.toList(),
+            "askAlbumsAfterImport" to askAlbumsAfterImport,
+            "defaultImportAlbumIds" to defaultImportAlbumIds.toList(),
         )
     }
 
@@ -397,8 +508,8 @@ class WakeWallStore(context: Context) {
     fun wallpaperMaps(values: List<String>): List<Map<String, Any>> {
         val saved = wallpapers
         return values.mapNotNull { value ->
-            val index = saved.indexOf(value)
-            if (index >= 0) wallpaperMap(index, value) else null
+            val index = activeWallpapers.indexOf(value)
+            if (value in saved) wallpaperMap(index.coerceAtLeast(0), value) else null
         }
     }
 
@@ -428,18 +539,23 @@ class WakeWallStore(context: Context) {
                     JSONObject()
                         .put("file", entryName)
                         .put("name", displayName(value))
-                        .put("crop", JSONObject(crop(index).asMap())),
+                        .put("crop", JSONObject(crop(value).asMap()))
+                        .put("albumIds", JSONArray(albumIds(value).toList())),
                 )
             }
             val manifest = JSONObject()
                 .put("format", BACKUP_FORMAT)
-                .put("version", 1)
+                .put("version", 3)
                 .put("index", index)
                 .put("paused", paused)
                 .put("shuffle", shuffle)
                 .put("fit", fit)
                 .put("wallpaperScrolling", wallpaperScrolling)
                 .put("photoSource", photoSource)
+                .put("albums", JSONArray(albums.map { JSONObject(it.asMap()) }))
+                .put("activeAlbumIds", JSONArray(activeAlbumIds.toList()))
+                .put("askAlbumsAfterImport", askAlbumsAfterImport)
+                .put("defaultImportAlbumIds", JSONArray(defaultImportAlbumIds.toList()))
                 .put("wallpapers", manifestWallpapers)
             zip.putNextEntry(ZipEntry("manifest.json"))
             zip.write(manifest.toString().toByteArray())
@@ -477,7 +593,22 @@ class WakeWallStore(context: Context) {
             }
             val manifest = JSONObject(manifestText ?: error("This is not a WakeWall backup."))
             require(manifest.optString("format") == BACKUP_FORMAT) { "This is not a WakeWall backup." }
-            require(manifest.optInt("version") == 1) { "This backup version is not supported." }
+            require(manifest.optInt("version") == 3) { "This backup version is not supported." }
+            val restoredAlbums = manifest.getJSONArray("albums").let { values ->
+                List(values.length()) { position ->
+                    val item = values.getJSONObject(position)
+                    WallpaperAlbum(item.getString("id"), item.getString("name"))
+                }
+            }
+            val restoredAlbumIds = restoredAlbums.mapTo(mutableSetOf()) { it.id }
+            val restoredActiveAlbums = manifest.getJSONArray("activeAlbumIds").let { values ->
+                List(values.length()) { values.getString(it) }
+                    .filterTo(linkedSetOf()) { it in restoredAlbumIds }
+            }
+            val restoredDefaultImportAlbums = manifest.getJSONArray("defaultImportAlbumIds").let { values ->
+                List(values.length()) { values.getString(it) }
+                    .filterTo(linkedSetOf()) { it in restoredAlbumIds }
+            }
             val entries = manifest.getJSONArray("wallpapers")
             require(entries.length() <= MAX_BACKUP_WALLPAPERS) {
                 "This backup contains too many wallpapers."
@@ -499,6 +630,10 @@ class WakeWallStore(context: Context) {
                             crop.optDouble("offsetX", 0.0).toFloat().coerceIn(-4f, 4f),
                             crop.optDouble("offsetY", 0.0).toFloat().coerceIn(-4f, 4f),
                         ),
+                        albumIds = item.getJSONArray("albumIds").let { ids ->
+                            List(ids.length()) { ids.getString(it) }
+                                .filterTo(linkedSetOf()) { it in restoredAlbumIds }
+                        },
                     ),
                 )
             }
@@ -525,6 +660,10 @@ class WakeWallStore(context: Context) {
                 .putString("fit", manifest.optString("fit", "cropToFill"))
                 .putBoolean("wallpaper_scrolling", manifest.optBoolean("wallpaperScrolling", false))
                 .putString("photo_source", manifest.optString("photoSource", "askEveryTime"))
+                .putString("albums", JSONArray(restoredAlbums.map { JSONObject(it.asMap()) }).toString())
+                .putString("active_album_ids", JSONArray(restoredActiveAlbums.toList()).toString())
+                .putBoolean("ask_albums_after_import", manifest.optBoolean("askAlbumsAfterImport", true))
+                .putString("default_import_album_ids", JSONArray(restoredDefaultImportAlbums.toList()).toString())
                 .putInt("image_format_version", 1)
             oldValues.forEach { value ->
                 editor
@@ -536,6 +675,7 @@ class WakeWallStore(context: Context) {
                     .remove("${legacyCropKey(value)}_scale")
                     .remove("${legacyCropKey(value)}_x")
                     .remove("${legacyCropKey(value)}_y")
+                    .remove(albumKey(value))
             }
             newValues.zip(restored).forEach { (value, restoredWallpaper) ->
                 editor
@@ -543,6 +683,7 @@ class WakeWallStore(context: Context) {
                     .putFloat("${cropKey(value)}_scale", restoredWallpaper.crop.scale)
                     .putFloat("${cropKey(value)}_x", restoredWallpaper.crop.offsetX)
                     .putFloat("${cropKey(value)}_y", restoredWallpaper.crop.offsetY)
+                    .putString(albumKey(value), JSONArray(restoredWallpaper.albumIds.toList()).toString())
             }
             editor.apply()
             oldValues.forEach { value ->
@@ -556,6 +697,38 @@ class WakeWallStore(context: Context) {
 
     private fun saveWallpapers(wallpapers: List<String>) {
         prefs.edit().putString("wallpapers", JSONArray(wallpapers).toString()).apply()
+        refreshActiveWallpapers()
+    }
+
+    private fun jsonArrayPreference(key: String): List<String> {
+        val saved = prefs.getString(key, null) ?: return emptyList()
+        return runCatching {
+            val array = JSONArray(saved)
+            List(array.length()) { array.getString(it) }
+        }.getOrDefault(emptyList())
+    }
+
+    private fun saveAlbums(values: List<WallpaperAlbum>) {
+        prefs.edit().putString(
+            "albums",
+            JSONArray(values.map { JSONObject(it.asMap()) }).toString(),
+        ).apply()
+    }
+
+    private fun saveDefaultImportAlbumIds(ids: Set<String>) {
+        val allowed = albums.mapTo(mutableSetOf()) { it.id }
+        prefs.edit().putString(
+            "default_import_album_ids",
+            JSONArray(ids.filter { it in allowed }).toString(),
+        ).apply()
+    }
+
+    private fun albumIds(value: String): Set<String> =
+        jsonArrayPreference(albumKey(value)).toSet()
+
+    private fun saveAlbumIds(value: String, ids: Set<String>) {
+        prefs.edit().putString(albumKey(value), JSONArray(ids.toList()).toString()).apply()
+        refreshActiveWallpapers()
     }
 
     // Moves older picker-based entries into the same reliable private storage.
@@ -595,6 +768,7 @@ class WakeWallStore(context: Context) {
     private fun legacyCropKey(value: String): String = "crop_${value.hashCode()}"
 
     private fun nameKey(value: String): String = "name_${storageKey(value)}"
+    private fun albumKey(value: String): String = "albums_${storageKey(value)}"
 
     private fun legacyNameKey(value: String): String = "name_${value.hashCode()}"
 
@@ -616,12 +790,16 @@ class WakeWallStore(context: Context) {
             .remove("${legacyCropKey(value)}_scale")
             .remove("${legacyCropKey(value)}_x")
             .remove("${legacyCropKey(value)}_y")
+            .remove(albumKey(value))
             .apply()
     }
 
     // Creates the small preview Flutter displays without passing the full photo.
     private fun wallpaperMap(index: Int, value: String): Map<String, Any> {
-        val result = mutableMapOf<String, Any>("crop" to crop(index).asMap())
+        val result = mutableMapOf<String, Any>(
+            "crop" to crop(value).asMap(),
+            "albumIds" to albumIds(value).toList(),
+        )
         if (value.startsWith(SAMPLE_PREFIX)) {
             result["sampleIndex"] = value.removePrefix(SAMPLE_PREFIX).toIntOrNull() ?: 0
             return result
@@ -635,12 +813,12 @@ class WakeWallStore(context: Context) {
             result["imageWidth"] = width
             result["imageHeight"] = height
         }
-        ensureWallpaperRenderFile(value, index, scrolling = false)
-        if (wallpaperScrolling) ensureWallpaperRenderFile(value, index, scrolling = true)
-        croppedPreview(value, index, MAIN_PREVIEW_WIDTH, 92, "main_crop_v2")?.let {
+        ensureWallpaperRenderFile(value, scrolling = false)
+        if (wallpaperScrolling) ensureWallpaperRenderFile(value, scrolling = true)
+        croppedPreview(value, MAIN_PREVIEW_WIDTH, 92, "main_crop_v2")?.let {
             result["mainPreview"] = it
         }
-        croppedPreview(value, index, SMALL_PREVIEW_WIDTH, 84, "small_crop_v2")?.let {
+        croppedPreview(value, SMALL_PREVIEW_WIDTH, 84, "small_crop_v2")?.let {
             result["thumbnail"] = it
         }
         sourcePreview?.let { result["preview"] = it }
@@ -698,17 +876,16 @@ class WakeWallStore(context: Context) {
     // Saves a screen-shaped crop snapshot so Flutter can display it immediately.
     private fun croppedPreview(
         value: String,
-        index: Int,
         targetWidth: Int,
         quality: Int,
         suffix: String,
     ): ByteArray? {
-        val file = ensureCroppedPreviewFile(value, index, targetWidth, quality, suffix) ?: return null
+        val file = ensureCroppedPreviewFile(value, targetWidth, quality, suffix) ?: return null
         return runCatching { file.readBytes() }.getOrNull()
     }
 
     // Creates a finished phone-sized render so the live wallpaper can switch without decoding the original.
-    private fun ensureWallpaperRenderFile(value: String, index: Int, scrolling: Boolean): File? {
+    private fun ensureWallpaperRenderFile(value: String, scrolling: Boolean): File? {
         val metrics = appContext.resources.displayMetrics
         val screenWidth = min(metrics.widthPixels, metrics.heightPixels).coerceAtLeast(1)
         val targetWidth = if (scrolling) {
@@ -718,7 +895,6 @@ class WakeWallStore(context: Context) {
         }
         return ensureCroppedPreviewFile(
             value,
-            index,
             targetWidth,
             100,
             if (scrolling) SCROLLING_RENDER_SUFFIX else WALLPAPER_RENDER_SUFFIX,
@@ -736,19 +912,18 @@ class WakeWallStore(context: Context) {
         val suffix = if (scrolling) SCROLLING_RENDER_SUFFIX else WALLPAPER_RENDER_SUFFIX
         val file = File(directory, "${storageKey(value)}_$suffix.jpg")
         return file.takeIf { it.isFile && it.length() > 0 }
-            ?: ensureWallpaperRenderFile(value, index, scrolling)
+            ?: ensureWallpaperRenderFile(value, scrolling)
     }
 
     // Builds wide renders before enabling scrolling so swipes never wait for image decoding.
     fun prepareScrollingRenders() {
-        wallpapers.forEachIndexed { index, value ->
-            if (!value.startsWith(SAMPLE_PREFIX)) ensureWallpaperRenderFile(value, index, scrolling = true)
+        wallpapers.forEach { value ->
+            if (!value.startsWith(SAMPLE_PREFIX)) ensureWallpaperRenderFile(value, scrolling = true)
         }
     }
 
     private fun ensureCroppedPreviewFile(
         value: String,
-        index: Int,
         targetWidth: Int,
         quality: Int,
         suffix: String,
@@ -763,7 +938,7 @@ class WakeWallStore(context: Context) {
         val screenHeight = max(metrics.widthPixels, metrics.heightPixels).coerceAtLeast(1)
         val outputHeight = targetHeight
             ?: max(1, (targetWidth * screenHeight.toFloat() / screenWidth).roundToInt())
-        val crop = crop(index)
+        val crop = crop(value)
         val source = fullAspectPreview(
             value,
             (max(targetWidth, outputHeight) * crop.scale.coerceIn(1f, 4f))
@@ -1206,6 +1381,7 @@ class WakeWallStore(context: Context) {
         val original = localFile(value) ?: return null
         val name = displayName(value)
         val savedCrop = crop(value)
+        val savedAlbums = albumIds(value)
         val replacement = File(original.parentFile, "${UUID.randomUUID()}.jpg")
         val decoded = runCatching {
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P) {
@@ -1233,6 +1409,7 @@ class WakeWallStore(context: Context) {
             .putFloat("${cropKey(replacementValue)}_scale", savedCrop.scale)
             .putFloat("${cropKey(replacementValue)}_x", savedCrop.offsetX)
             .putFloat("${cropKey(replacementValue)}_y", savedCrop.offsetY)
+            .putString(albumKey(replacementValue), JSONArray(savedAlbums.toList()).toString())
             .apply()
         deleteMetadata(value)
         deleteCachedPreviews(value)
@@ -1310,7 +1487,12 @@ data class RestoredWallpaper(
     val source: File,
     val name: String,
     val crop: CropTransform,
+    val albumIds: Set<String>,
 )
+
+data class WallpaperAlbum(val id: String, val name: String) {
+    fun asMap(): Map<String, String> = mapOf("id" to id, "name" to name)
+}
 
 data class RemovedWallpaper(
     val value: String,

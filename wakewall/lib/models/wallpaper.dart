@@ -8,6 +8,13 @@ enum RotationOrder { sequential, shuffle }
 
 enum PhotoSource { askEveryTime, photos, files }
 
+class WallpaperAlbum {
+  const WallpaperAlbum({required this.id, required this.name});
+
+  final String id;
+  final String name;
+}
+
 class Wallpaper {
   const Wallpaper({
     required this.id,
@@ -21,6 +28,7 @@ class Wallpaper {
     this.imageWidth,
     this.imageHeight,
     this.crop = const WallpaperCrop(),
+    this.albumIds = const {},
   });
 
   final String id;
@@ -34,6 +42,7 @@ class Wallpaper {
   final int? imageWidth;
   final int? imageHeight;
   final WallpaperCrop crop;
+  final Set<String> albumIds;
 
   bool get isUserImage => uri != null;
 
@@ -42,6 +51,7 @@ class Wallpaper {
     Uint8List? thumbnail,
     Uint8List? mainPreview,
     Uint8List? preview,
+    Set<String>? albumIds,
   }) => Wallpaper(
     id: id,
     name: name,
@@ -54,6 +64,7 @@ class Wallpaper {
     imageWidth: imageWidth,
     imageHeight: imageHeight,
     crop: crop ?? this.crop,
+    albumIds: albumIds ?? this.albumIds,
   );
 }
 

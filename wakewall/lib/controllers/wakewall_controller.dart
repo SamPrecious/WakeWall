@@ -11,6 +11,10 @@ class WakeWallController extends ChangeNotifier {
 
   final NativeWallpaperBridge _bridge;
   final List<Wallpaper> _wallpapers = [];
+  final List<WallpaperAlbum> _albums = [];
+  Set<String> _activeAlbumIds = {};
+  bool _askAlbumsAfterImport = true;
+  Set<String> _defaultImportAlbumIds = {};
 
   int _selectedIndex = 0;
   bool _paused = false;
@@ -23,6 +27,11 @@ class WakeWallController extends ChangeNotifier {
   Future<void>? _initialization;
 
   List<Wallpaper> get wallpapers => List.unmodifiable(_wallpapers);
+  List<WallpaperAlbum> get albums => List.unmodifiable(_albums);
+  Set<String> get activeAlbumIds => Set.unmodifiable(_activeAlbumIds);
+  bool get askAlbumsAfterImport => _askAlbumsAfterImport;
+  Set<String> get defaultImportAlbumIds =>
+      Set.unmodifiable(_defaultImportAlbumIds);
   int get selectedIndex => _selectedIndex;
   bool get hasWallpapers => _wallpapers.isNotEmpty;
   bool get paused => _paused;
@@ -133,6 +142,41 @@ class WakeWallController extends ChangeNotifier {
     _photoSource = value;
     notifyListeners();
     await _runNative(() => _bridge.updatePhotoSource(value.name));
+  }
+
+  Future<void> createAlbum(String name) =>
+      _applyNativeConfiguration(() => _bridge.createAlbum(name));
+
+  Future<void> renameAlbum(String id, String name) =>
+      _applyNativeConfiguration(() => _bridge.renameAlbum(id, name));
+
+  Future<void> deleteAlbum(String id) =>
+      _applyNativeConfiguration(() => _bridge.deleteAlbum(id));
+
+  Future<void> setActiveAlbums(Set<String> ids) =>
+      _applyNativeConfiguration(() => _bridge.setActiveAlbums(ids));
+
+  Future<void> updateWallpaperAlbums(Wallpaper wallpaper, Set<String> ids) =>
+      _applyNativeConfiguration(
+        () => _bridge.updateWallpaperAlbums(wallpaper.id, ids),
+      );
+
+  Future<void> setImportAlbumPreference(bool ask, Set<String> ids) async {
+    _askAlbumsAfterImport = ask;
+    _defaultImportAlbumIds = {...ids};
+    notifyListeners();
+    await _applyNativeConfiguration(
+      () => _bridge.updateImportAlbumPreference(ask, ids),
+    );
+  }
+
+  Future<void> _applyNativeConfiguration(
+    Future<Map<String, Object?>> Function() action,
+  ) async {
+    await _runNative(() async {
+      _applyConfiguration(await action());
+      notifyListeners();
+    });
   }
 
   Future<String?> backup({VoidCallback? onOperationStarted}) =>
@@ -359,6 +403,34 @@ class WakeWallController extends ChangeNotifier {
         ..clear()
         ..addAll(restored);
     }
+    final savedAlbums = configuration['albums'] as List<Object?>?;
+    if (savedAlbums != null) {
+      _albums
+        ..clear()
+        ..addAll(
+          savedAlbums
+              .whereType<Map>()
+              .map((value) {
+                final data = Map<Object?, Object?>.from(value);
+                return WallpaperAlbum(
+                  id: data['id'] as String? ?? '',
+                  name: data['name'] as String? ?? 'Album',
+                );
+              })
+              .where((album) => album.id.isNotEmpty),
+        );
+    }
+    final activeIds = configuration['activeAlbumIds'] as List<Object?>?;
+    if (activeIds != null) {
+      _activeAlbumIds = activeIds.whereType<String>().toSet();
+    }
+    _askAlbumsAfterImport =
+        configuration['askAlbumsAfterImport'] as bool? ?? _askAlbumsAfterImport;
+    final defaultAlbumIds =
+        configuration['defaultImportAlbumIds'] as List<Object?>?;
+    if (defaultAlbumIds != null) {
+      _defaultImportAlbumIds = defaultAlbumIds.whereType<String>().toSet();
+    }
     final savedIndex =
         (configuration['index'] as num?)?.toInt() ?? _selectedIndex;
     _selectedIndex = _wallpapers.isEmpty ? 0 : savedIndex % _wallpapers.length;
@@ -414,6 +486,9 @@ class WakeWallController extends ChangeNotifier {
       imageWidth: (data['imageWidth'] as num?)?.toInt(),
       imageHeight: (data['imageHeight'] as num?)?.toInt(),
       crop: crop,
+      albumIds: (data['albumIds'] as List<Object?>? ?? const [])
+          .whereType<String>()
+          .toSet(),
     );
   }
 

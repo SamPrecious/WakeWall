@@ -146,6 +146,51 @@ class NativeWallpaperBridge {
     await _channel.invokeMethod<void>('updatePhotoSource', {'source': source});
   }
 
+  Future<Map<String, Object?>> createAlbum(String name) async =>
+      await _channel.invokeMapMethod<String, Object?>('createAlbum', {
+        'name': name,
+      }) ??
+      const {};
+
+  Future<Map<String, Object?>> renameAlbum(String id, String name) async =>
+      await _channel.invokeMapMethod<String, Object?>('renameAlbum', {
+        'id': id,
+        'name': name,
+      }) ??
+      const {};
+
+  Future<Map<String, Object?>> deleteAlbum(String id) async =>
+      await _channel.invokeMapMethod<String, Object?>('deleteAlbum', {
+        'id': id,
+      }) ??
+      const {};
+
+  Future<Map<String, Object?>> setActiveAlbums(Set<String> ids) async =>
+      await _channel.invokeMapMethod<String, Object?>('setActiveAlbums', {
+        'ids': ids.toList(),
+      }) ??
+      const {};
+
+  Future<Map<String, Object?>> updateWallpaperAlbums(
+    String value,
+    Set<String> ids,
+  ) async =>
+      await _channel.invokeMapMethod<String, Object?>('updateWallpaperAlbums', {
+        'value': value,
+        'ids': ids.toList(),
+      }) ??
+      const {};
+
+  Future<Map<String, Object?>> updateImportAlbumPreference(
+    bool ask,
+    Set<String> ids,
+  ) async =>
+      await _channel.invokeMapMethod<String, Object?>(
+        'updateImportAlbumPreference',
+        {'ask': ask, 'ids': ids.toList()},
+      ) ??
+      const {};
+
   Future<Map<String, Object?>> configuration() async {
     final result = await _channel.invokeMapMethod<String, Object?>(
       'configuration',

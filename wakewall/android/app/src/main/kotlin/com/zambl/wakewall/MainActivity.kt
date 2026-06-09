@@ -175,6 +175,56 @@ class MainActivity : FlutterFragmentActivity() {
                         result.success(null)
                     }
 
+                    "createAlbum" -> runInBackground(result) {
+                        val store = WakeWallStore(this)
+                        store.createAlbum(call.argument<String>("name") ?: "")
+                        configurationWithStatus(store)
+                    }
+
+                    "renameAlbum" -> runInBackground(result) {
+                        val store = WakeWallStore(this)
+                        store.renameAlbum(
+                            call.argument<String>("id") ?: "",
+                            call.argument<String>("name") ?: "",
+                        )
+                        configurationWithStatus(store)
+                    }
+
+                    "deleteAlbum" -> runInBackground(result) {
+                        val store = WakeWallStore(this)
+                        store.deleteAlbum(call.argument<String>("id") ?: "")
+                        notifyWallpaperService()
+                        configurationWithStatus(store)
+                    }
+
+                    "setActiveAlbums" -> runInBackground(result) {
+                        val store = WakeWallStore(this)
+                        store.setActiveAlbums(
+                            call.argument<List<String>>("ids").orEmpty().toSet(),
+                        )
+                        notifyWallpaperService()
+                        configurationWithStatus(store)
+                    }
+
+                    "updateWallpaperAlbums" -> runInBackground(result) {
+                        val store = WakeWallStore(this)
+                        store.updateWallpaperAlbums(
+                            call.argument<String>("value") ?: "",
+                            call.argument<List<String>>("ids").orEmpty().toSet(),
+                        )
+                        notifyWallpaperService()
+                        configurationWithStatus(store)
+                    }
+
+                    "updateImportAlbumPreference" -> {
+                        val store = WakeWallStore(this)
+                        store.updateImportAlbumPreference(
+                            call.argument<Boolean>("ask") ?: true,
+                            call.argument<List<String>>("ids").orEmpty().toSet(),
+                        )
+                        result.success(store.state())
+                    }
+
                     "updateCrop" -> {
                         val index = call.argument<Int>("index") ?: 0
                         runInBackground(result) {

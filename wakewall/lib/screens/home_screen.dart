@@ -166,6 +166,7 @@ class _HomeScreenState extends State<HomeScreen> {
                             height: headerHeight,
                             child: _Header(
                               paused: controller.paused,
+                              onAlbums: () => _showAlbums(context),
                               onSettings: () => _showSettings(context),
                             ),
                           ),
@@ -178,6 +179,7 @@ class _HomeScreenState extends State<HomeScreen> {
                                 draggingWallpaper: draggingWallpaper,
                                 onRemoveWallpaper: _removeWallpaper,
                                 onAdd: _addImages,
+                                onAlbums: _showCurrentWallpaperAlbums,
                                 onCrop: () => context.router.push(
                                   CropEditorRoute(
                                     controller: controller,
@@ -233,6 +235,30 @@ class _HomeScreenState extends State<HomeScreen> {
     );
   }
 
+  Future<void> _showAlbums(BuildContext context) {
+    return showModalBottomSheet<void>(
+      context: context,
+      isScrollControlled: true,
+      useSafeArea: true,
+      builder: (_) => _AlbumsSheet(controller: controller),
+    );
+  }
+
+  Future<void> _showCurrentWallpaperAlbums() async {
+    final wallpaper = controller.selectedWallpaper;
+    if (wallpaper == null) return;
+    await showModalBottomSheet<void>(
+      context: context,
+      isScrollControlled: true,
+      useSafeArea: true,
+      builder: (_) => _AssignAlbumsSheet(
+        controller: controller,
+        wallpapers: [wallpaper],
+        isImport: false,
+      ),
+    );
+  }
+
   Future<void> _removeWallpaper(int index) async {
     if (draggingWallpaper) setState(() => draggingWallpaper = false);
     final removal = await controller.removeAt(index);
@@ -254,6 +280,9 @@ class _HomeScreenState extends State<HomeScreen> {
 
   Future<void> _addImages() async {
     final wasEmpty = !controller.hasWallpapers;
+    final existingIds = controller.wallpapers
+        .map((wallpaper) => wallpaper.id)
+        .toSet();
     var source = controller.photoSource;
     if (source == PhotoSource.askEveryTime) {
       final choice = await showModalBottomSheet<_AddSourceChoice>(
@@ -304,7 +333,33 @@ class _HomeScreenState extends State<HomeScreen> {
         onAction: () {},
       );
     }
-    if (wasEmpty && controller.hasWallpapers) {
+    final added = controller.wallpapers
+        .where((wallpaper) => !existingIds.contains(wallpaper.id))
+        .toList();
+    if (added.isNotEmpty && mounted) {
+      if (controller.askAlbumsAfterImport) {
+        await showModalBottomSheet<void>(
+          context: context,
+          isScrollControlled: true,
+          useSafeArea: true,
+          isDismissible: false,
+          enableDrag: false,
+          builder: (_) => _AssignAlbumsSheet(
+            controller: controller,
+            wallpapers: added,
+            isImport: true,
+          ),
+        );
+      } else {
+        for (final wallpaper in added) {
+          await controller.updateWallpaperAlbums(
+            wallpaper,
+            controller.defaultImportAlbumIds,
+          );
+        }
+      }
+    }
+    if (mounted && wasEmpty && controller.hasWallpapers) {
       await _offerWallpaperSetupIfNeeded(context, controller);
     }
   }
@@ -420,9 +475,14 @@ class _OperationOverlay extends StatelessWidget {
 }
 
 class _Header extends StatelessWidget {
-  const _Header({required this.paused, required this.onSettings});
+  const _Header({
+    required this.paused,
+    required this.onAlbums,
+    required this.onSettings,
+  });
 
   final bool paused;
+  final VoidCallback onAlbums;
   final VoidCallback onSettings;
 
   @override
@@ -453,9 +513,17 @@ class _Header extends StatelessWidget {
             icon: const Icon(Icons.settings_outlined),
           ),
         ),
+        Positioned(
+          left: 0,
+          child: IconButton(
+            onPressed: onAlbums,
+            tooltip: 'Albums',
+            icon: const Icon(Icons.photo_library_outlined),
+          ),
+        ),
         if (paused)
           const Positioned(
-            left: 0,
+            bottom: 0,
             child: _StatusPill(label: 'Paused', icon: Icons.pause_rounded),
           ),
       ],
@@ -470,6 +538,7 @@ class _Preview extends StatelessWidget {
     required this.draggingWallpaper,
     required this.onRemoveWallpaper,
     required this.onAdd,
+    required this.onAlbums,
     required this.onCrop,
   });
 
@@ -478,6 +547,7 @@ class _Preview extends StatelessWidget {
   final bool draggingWallpaper;
   final Future<void> Function(int) onRemoveWallpaper;
   final VoidCallback onAdd;
+  final VoidCallback onAlbums;
   final VoidCallback onCrop;
 
   @override
@@ -531,6 +601,12 @@ class _Preview extends StatelessWidget {
                         bottom: 14,
                         child: Row(
                           children: [
+                            _OverlayButton(
+                              icon: Icons.photo_album_outlined,
+                              tooltip: 'Add to albums',
+                              onTap: onAlbums,
+                            ),
+                            const SizedBox(width: 8),
                             _OverlayButton(
                               icon: Icons.crop_rounded,
                               tooltip: 'Adjust crop',
@@ -886,6 +962,290 @@ class _WallpaperTile extends StatelessWidget {
   }
 }
 
+class _AlbumsSheet extends StatefulWidget {
+  const _AlbumsSheet({required this.controller});
+  final WakeWallController controller;
+
+  @override
+  State<_AlbumsSheet> createState() => _AlbumsSheetState();
+}
+
+class _AlbumsSheetState extends State<_AlbumsSheet> {
+  WakeWallController get controller => widget.controller;
+
+  @override
+  Widget build(BuildContext context) {
+    return ListenableBuilder(
+      listenable: controller,
+      builder: (context, _) => SingleChildScrollView(
+        padding: const EdgeInsets.fromLTRB(20, 6, 20, 24),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: [
+            Row(
+              children: [
+                Text('Albums', style: Theme.of(context).textTheme.titleLarge),
+                const Spacer(),
+                IconButton(
+                  onPressed: _createAlbum,
+                  tooltip: 'Create album',
+                  icon: const Icon(Icons.add_rounded),
+                ),
+                IconButton(
+                  onPressed: () => Navigator.pop(context),
+                  tooltip: 'Close albums',
+                  icon: const Icon(Icons.close_rounded),
+                ),
+              ],
+            ),
+            const SizedBox(height: 10),
+            _AlbumFilterTile(
+              title: 'All wallpapers',
+              icon: Icons.photo_library_outlined,
+              selected: controller.activeAlbumIds.isEmpty,
+              onTap: () => controller.setActiveAlbums({}),
+            ),
+            for (final album in controller.albums)
+              _AlbumFilterTile(
+                title: album.name,
+                icon: Icons.photo_album_outlined,
+                selected: controller.activeAlbumIds.contains(album.id),
+                onTap: () => _toggle(album.id),
+                onLongPress: () => _manageAlbum(album),
+              ),
+            if (controller.albums.isEmpty) ...[
+              const SizedBox(height: 16),
+              Text(
+                'Create an album to group wallpapers without making extra copies.',
+                textAlign: TextAlign.center,
+                style: Theme.of(
+                  context,
+                ).textTheme.bodyMedium?.copyWith(color: WakeWallColors.muted),
+              ),
+            ],
+          ],
+        ),
+      ),
+    );
+  }
+
+  Future<void> _toggle(String id) async {
+    final updated = {...controller.activeAlbumIds};
+    updated.contains(id) ? updated.remove(id) : updated.add(id);
+    await controller.setActiveAlbums(updated);
+  }
+
+  Future<void> _createAlbum() async {
+    final name = await _albumNameDialog(context, title: 'New album');
+    if (name != null) await controller.createAlbum(name);
+  }
+
+  Future<void> _manageAlbum(WallpaperAlbum album) async {
+    final action = await showModalBottomSheet<String>(
+      context: context,
+      builder: (context) => SafeArea(
+        child: Wrap(
+          children: [
+            ListTile(
+              leading: const Icon(Icons.edit_outlined),
+              title: const Text('Rename'),
+              onTap: () => Navigator.pop(context, 'rename'),
+            ),
+            ListTile(
+              leading: const Icon(Icons.delete_outline_rounded),
+              title: const Text('Delete album'),
+              subtitle: const Text('Wallpapers will not be deleted'),
+              onTap: () => Navigator.pop(context, 'delete'),
+            ),
+          ],
+        ),
+      ),
+    );
+    if (!mounted) return;
+    if (action == 'rename') {
+      final name = await _albumNameDialog(
+        context,
+        title: 'Rename album',
+        initialValue: album.name,
+      );
+      if (name != null) await controller.renameAlbum(album.id, name);
+    } else if (action == 'delete') {
+      await controller.deleteAlbum(album.id);
+    }
+  }
+}
+
+class _AssignAlbumsSheet extends StatefulWidget {
+  const _AssignAlbumsSheet({
+    required this.controller,
+    required this.wallpapers,
+    required this.isImport,
+  });
+  final WakeWallController controller;
+  final List<Wallpaper> wallpapers;
+  final bool isImport;
+
+  @override
+  State<_AssignAlbumsSheet> createState() => _AssignAlbumsSheetState();
+}
+
+class _AssignAlbumsSheetState extends State<_AssignAlbumsSheet> {
+  late Set<String> selected = !widget.isImport && widget.wallpapers.length == 1
+      ? {...widget.wallpapers.first.albumIds}
+      : {};
+  bool remember = false;
+
+  @override
+  Widget build(BuildContext context) {
+    return SingleChildScrollView(
+      padding: const EdgeInsets.fromLTRB(20, 6, 20, 24),
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          Row(
+            children: [
+              Text('Albums', style: Theme.of(context).textTheme.titleLarge),
+              const Spacer(),
+              IconButton(
+                onPressed: _createAlbum,
+                tooltip: 'Create album',
+                icon: const Icon(Icons.add_rounded),
+              ),
+            ],
+          ),
+          const SizedBox(height: 8),
+          CheckboxListTile(
+            contentPadding: EdgeInsets.zero,
+            title: const Text('No album'),
+            value: selected.isEmpty,
+            onChanged: (_) => setState(selected.clear),
+          ),
+          for (final album in widget.controller.albums)
+            CheckboxListTile(
+              contentPadding: EdgeInsets.zero,
+              title: Text(album.name),
+              value: selected.contains(album.id),
+              onChanged: (_) => setState(() {
+                selected.contains(album.id)
+                    ? selected.remove(album.id)
+                    : selected.add(album.id);
+              }),
+            ),
+          if (widget.controller.albums.isEmpty)
+            Text(
+              'No albums yet. These wallpapers will remain in All wallpapers.',
+              style: Theme.of(
+                context,
+              ).textTheme.bodyMedium?.copyWith(color: WakeWallColors.muted),
+            ),
+          if (widget.isImport) ...[
+            const SizedBox(height: 10),
+            _RememberChoiceTile(
+              label: "Don't ask me again",
+              description: 'You can change this later in Settings',
+              value: remember,
+              onChanged: (value) => setState(() => remember = value),
+            ),
+          ],
+          const SizedBox(height: 18),
+          FilledButton(onPressed: _save, child: const Text('Done')),
+        ],
+      ),
+    );
+  }
+
+  Future<void> _save() async {
+    for (final wallpaper in widget.wallpapers) {
+      await widget.controller.updateWallpaperAlbums(wallpaper, selected);
+    }
+    if (widget.isImport && remember) {
+      await widget.controller.setImportAlbumPreference(false, selected);
+    }
+    if (mounted) Navigator.pop(context);
+  }
+
+  Future<void> _createAlbum() async {
+    final existing = widget.controller.albums.map((album) => album.id).toSet();
+    final name = await _albumNameDialog(context, title: 'New album');
+    if (name == null) return;
+    await widget.controller.createAlbum(name);
+    WallpaperAlbum? created;
+    for (final album in widget.controller.albums) {
+      if (!existing.contains(album.id)) {
+        created = album;
+        break;
+      }
+    }
+    final createdId = created?.id;
+    if (createdId != null && mounted) setState(() => selected.add(createdId));
+  }
+}
+
+class _AlbumFilterTile extends StatelessWidget {
+  const _AlbumFilterTile({
+    required this.title,
+    required this.icon,
+    required this.selected,
+    required this.onTap,
+    this.onLongPress,
+  });
+  final String title;
+  final IconData icon;
+  final bool selected;
+  final VoidCallback onTap;
+  final VoidCallback? onLongPress;
+
+  @override
+  Widget build(BuildContext context) {
+    return ListTile(
+      contentPadding: const EdgeInsets.symmetric(horizontal: 4),
+      leading: Icon(icon),
+      title: Text(title),
+      trailing: Icon(
+        selected ? Icons.check_circle_rounded : Icons.circle_outlined,
+        color: selected ? WakeWallColors.tealStrong : WakeWallColors.muted,
+      ),
+      onTap: onTap,
+      onLongPress: onLongPress,
+    );
+  }
+}
+
+Future<String?> _albumNameDialog(
+  BuildContext context, {
+  required String title,
+  String initialValue = '',
+}) async {
+  final textController = TextEditingController(text: initialValue);
+  final result = await showDialog<String>(
+    context: context,
+    builder: (context) => AlertDialog(
+      backgroundColor: WakeWallColors.surface,
+      title: Text(title),
+      content: TextField(
+        controller: textController,
+        autofocus: true,
+        maxLength: 40,
+        decoration: const InputDecoration(hintText: 'Album name'),
+      ),
+      actions: [
+        TextButton(
+          onPressed: () => Navigator.pop(context),
+          child: const Text('Cancel'),
+        ),
+        FilledButton(
+          onPressed: () => Navigator.pop(context, textController.text.trim()),
+          child: const Text('Save'),
+        ),
+      ],
+    ),
+  );
+  textController.dispose();
+  return result == null || result.isEmpty ? null : result;
+}
+
 class _SettingsSheet extends StatefulWidget {
   const _SettingsSheet({required this.controller});
 
@@ -955,6 +1315,16 @@ class _SettingsSheetState extends State<_SettingsSheet> {
                     selectedIndex: controller.photoSource.index,
                     onSelected: (index) =>
                         controller.setPhotoSource(PhotoSource.values[index]),
+                  ),
+                  const SizedBox(height: 10),
+                  _SwitchTile(
+                    label: 'Ask which albums',
+                    description: 'Choose albums after adding wallpapers',
+                    value: controller.askAlbumsAfterImport,
+                    onChanged: (value) => controller.setImportAlbumPreference(
+                      value,
+                      controller.defaultImportAlbumIds,
+                    ),
                   ),
                   const SizedBox(height: 10),
                   _SwitchTile(
@@ -1183,10 +1553,9 @@ class _AddSourceSheetState extends State<_AddSourceSheet> {
             onTap: () => _select(PhotoSource.files),
           ),
           const SizedBox(height: 14),
-          SwitchListTile(
-            contentPadding: EdgeInsets.zero,
-            title: const Text('Always use my choice'),
-            subtitle: const Text('You can change this later in Settings'),
+          _RememberChoiceTile(
+            label: 'Always use my choice',
+            description: 'You can change this later in Settings',
             value: remember,
             onChanged: (value) => setState(() => remember = value),
           ),
@@ -1374,6 +1743,31 @@ class _SwitchTile extends StatelessWidget {
           Switch(value: value, onChanged: onChanged),
         ],
       ),
+    );
+  }
+}
+
+class _RememberChoiceTile extends StatelessWidget {
+  const _RememberChoiceTile({
+    required this.label,
+    required this.description,
+    required this.value,
+    required this.onChanged,
+  });
+
+  final String label;
+  final String description;
+  final bool value;
+  final ValueChanged<bool> onChanged;
+
+  @override
+  Widget build(BuildContext context) {
+    return SwitchListTile(
+      contentPadding: EdgeInsets.zero,
+      title: Text(label),
+      subtitle: Text(description),
+      value: value,
+      onChanged: onChanged,
     );
   }
 }
