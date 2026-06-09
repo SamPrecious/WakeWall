@@ -134,11 +134,18 @@ class NativeWallpaperBridge {
     required double scale,
     required double offsetX,
     required double offsetY,
+    required String displayMode,
+    required int fitBackgroundColor,
   }) async {
-    final result = await _channel.invokeMapMethod<String, Object?>(
-      'updateCrop',
-      {'index': index, 'scale': scale, 'offsetX': offsetX, 'offsetY': offsetY},
-    );
+    final result = await _channel
+        .invokeMapMethod<String, Object?>('updateCrop', {
+          'index': index,
+          'scale': scale,
+          'offsetX': offsetX,
+          'offsetY': offsetY,
+          'displayMode': displayMode,
+          'fitBackgroundColor': fitBackgroundColor,
+        });
     return result ?? const {};
   }
 

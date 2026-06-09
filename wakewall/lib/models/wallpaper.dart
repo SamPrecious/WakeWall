@@ -4,6 +4,8 @@ import 'package:flutter/material.dart';
 
 enum WallpaperFit { cropToFill, fitEntireImage }
 
+enum WallpaperDisplayMode { fill, fit, blur }
+
 enum RotationOrder { sequential, shuffle }
 
 enum PhotoSource { askEveryTime, photos, files }
@@ -28,6 +30,8 @@ class Wallpaper {
     this.imageWidth,
     this.imageHeight,
     this.crop = const WallpaperCrop(),
+    this.displayMode = WallpaperDisplayMode.fill,
+    this.fitBackgroundColor = const Color(0xFF202124),
     this.albumIds = const {},
   });
 
@@ -42,12 +46,16 @@ class Wallpaper {
   final int? imageWidth;
   final int? imageHeight;
   final WallpaperCrop crop;
+  final WallpaperDisplayMode displayMode;
+  final Color fitBackgroundColor;
   final Set<String> albumIds;
 
   bool get isUserImage => uri != null;
 
   Wallpaper copyWith({
     WallpaperCrop? crop,
+    WallpaperDisplayMode? displayMode,
+    Color? fitBackgroundColor,
     Uint8List? thumbnail,
     Uint8List? mainPreview,
     Uint8List? preview,
@@ -64,6 +72,8 @@ class Wallpaper {
     imageWidth: imageWidth,
     imageHeight: imageHeight,
     crop: crop ?? this.crop,
+    displayMode: displayMode ?? this.displayMode,
+    fitBackgroundColor: fitBackgroundColor ?? this.fitBackgroundColor,
     albumIds: albumIds ?? this.albumIds,
   );
 }

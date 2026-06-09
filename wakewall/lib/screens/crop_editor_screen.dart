@@ -25,6 +25,8 @@ class CropEditorScreen extends StatefulWidget {
 
 class _CropEditorScreenState extends State<CropEditorScreen> {
   late WallpaperCrop crop;
+  late WallpaperDisplayMode displayMode;
+  late Color fitBackgroundColor;
   double gestureStartScale = 1;
   Offset gestureStartFocalPoint = Offset.zero;
   double gestureStartX = 0;
@@ -38,6 +40,8 @@ class _CropEditorScreenState extends State<CropEditorScreen> {
   void initState() {
     super.initState();
     crop = wallpaper.crop;
+    displayMode = wallpaper.displayMode;
+    fitBackgroundColor = wallpaper.fitBackgroundColor;
   }
 
   @override
@@ -47,11 +51,17 @@ class _CropEditorScreenState extends State<CropEditorScreen> {
         child: Column(
           children: [
             _EditorHeader(
-              wallpaperName: wallpaper.name,
               saving: saving,
-              canReset: !crop.isDefault,
+              canReset:
+                  !crop.isDefault ||
+                  displayMode != WallpaperDisplayMode.fill ||
+                  fitBackgroundColor != const Color(0xFF202124),
               onCancel: () => context.router.pop(),
-              onReset: () => setState(() => crop = const WallpaperCrop()),
+              onReset: () => setState(() {
+                crop = const WallpaperCrop();
+                displayMode = WallpaperDisplayMode.fill;
+                fitBackgroundColor = const Color(0xFF202124);
+              }),
               onSave: _save,
             ),
             Expanded(
@@ -74,6 +84,7 @@ class _CropEditorScreenState extends State<CropEditorScreen> {
                       hint: 'Drag to position and pinch to zoom',
                       image: true,
                       child: GestureDetector(
+                        behavior: HitTestBehavior.opaque,
                         onScaleStart: (details) {
                           gestureStartScale = crop.scale;
                           gestureStartFocalPoint = details.focalPoint;
@@ -89,15 +100,27 @@ class _CropEditorScreenState extends State<CropEditorScreen> {
                               wallpaper.imageWidth?.toDouble() ?? width;
                           final sourceHeight =
                               wallpaper.imageHeight?.toDouble() ?? height;
-                          final coverScale = math.max(
-                            width / sourceWidth,
-                            height / sourceHeight,
-                          );
+                          final baseScale =
+                              displayMode == WallpaperDisplayMode.fill
+                              ? math.max(
+                                  width / sourceWidth,
+                                  height / sourceHeight,
+                                )
+                              : math.min(
+                                  width / sourceWidth,
+                                  height / sourceHeight,
+                                );
                           final maxOffsetX =
-                              (sourceWidth * coverScale * nextScale - width) /
+                              math.max(
+                                0,
+                                sourceWidth * baseScale * nextScale - width,
+                              ) /
                               (2 * width);
                           final maxOffsetY =
-                              (sourceHeight * coverScale * nextScale - height) /
+                              math.max(
+                                0,
+                                sourceHeight * baseScale * nextScale - height,
+                              ) /
                               (2 * height);
                           // Keeps the wallpaper inside the preview while it is moved.
                           setState(() {
@@ -121,6 +144,8 @@ class _CropEditorScreenState extends State<CropEditorScreen> {
                                 child: AbstractWallpaper(
                                   wallpaper: wallpaper,
                                   crop: crop,
+                                  displayMode: displayMode,
+                                  fitBackgroundColor: fitBackgroundColor,
                                   previewBytes: wallpaper.preview,
                                   borderRadius: BorderRadius.circular(18),
                                 ),
@@ -141,7 +166,15 @@ class _CropEditorScreenState extends State<CropEditorScreen> {
                 },
               ),
             ),
-            _EditorFooter(crop: crop),
+            _EditorFooter(
+              crop: crop,
+              displayMode: displayMode,
+              fitBackgroundColor: fitBackgroundColor,
+              onDisplayModeChanged: (value) =>
+                  setState(() => displayMode = value),
+              onFitBackgroundColorChanged: (value) =>
+                  setState(() => fitBackgroundColor = value),
+            ),
           ],
         ),
       ),
@@ -150,7 +183,12 @@ class _CropEditorScreenState extends State<CropEditorScreen> {
 
   Future<void> _save() async {
     setState(() => saving = true);
-    await widget.controller.updateCrop(widget.wallpaperIndex, crop);
+    await widget.controller.updateCrop(
+      widget.wallpaperIndex,
+      crop,
+      displayMode: displayMode,
+      fitBackgroundColor: fitBackgroundColor,
+    );
     if (!mounted) return;
     context.router.pop();
   }
@@ -158,7 +196,6 @@ class _CropEditorScreenState extends State<CropEditorScreen> {
 
 class _EditorHeader extends StatelessWidget {
   const _EditorHeader({
-    required this.wallpaperName,
     required this.saving,
     required this.canReset,
     required this.onCancel,
@@ -166,7 +203,6 @@ class _EditorHeader extends StatelessWidget {
     required this.onSave,
   });
 
-  final String wallpaperName;
   final bool saving;
   final bool canReset;
   final VoidCallback onCancel;
@@ -181,28 +217,19 @@ class _EditorHeader extends StatelessWidget {
         children: [
           TextButton(onPressed: onCancel, child: const Text('Cancel')),
           Expanded(
-            child: Column(
-              children: [
-                Text(
-                  'Adjust crop',
-                  style: Theme.of(context).textTheme.titleMedium,
-                ),
-                Text(
-                  wallpaperName,
-                  style: Theme.of(
-                    context,
-                  ).textTheme.bodySmall?.copyWith(color: WakeWallColors.muted),
-                ),
-              ],
+            child: Text(
+              'Adjust Wallpaper',
+              textAlign: TextAlign.center,
+              style: Theme.of(context).textTheme.headlineSmall,
             ),
           ),
           if (canReset)
-            IconButton(
-              onPressed: onReset,
-              tooltip: 'Reset crop',
-              icon: const Icon(
-                Icons.restart_alt_rounded,
-                color: WakeWallColors.muted,
+            Tooltip(
+              message: 'Reset wallpaper',
+              child: TextButton.icon(
+                onPressed: onReset,
+                icon: const Icon(Icons.restart_alt_rounded, size: 18),
+                label: const Text('Reset'),
               ),
             ),
           TextButton(
@@ -216,32 +243,146 @@ class _EditorHeader extends StatelessWidget {
 }
 
 class _EditorFooter extends StatelessWidget {
-  const _EditorFooter({required this.crop});
+  const _EditorFooter({
+    required this.crop,
+    required this.displayMode,
+    required this.fitBackgroundColor,
+    required this.onDisplayModeChanged,
+    required this.onFitBackgroundColorChanged,
+  });
 
   final WallpaperCrop crop;
+  final WallpaperDisplayMode displayMode;
+  final Color fitBackgroundColor;
+  final ValueChanged<WallpaperDisplayMode> onDisplayModeChanged;
+  final ValueChanged<Color> onFitBackgroundColorChanged;
 
   @override
   Widget build(BuildContext context) {
     return Padding(
       padding: const EdgeInsets.fromLTRB(24, 8, 24, 22),
-      child: Row(
-        mainAxisAlignment: MainAxisAlignment.center,
+      child: Column(
         children: [
-          const Icon(
-            Icons.pinch_rounded,
-            size: 18,
-            color: WakeWallColors.muted,
+          SizedBox(
+            width: double.infinity,
+            child: SegmentedButton<WallpaperDisplayMode>(
+              segments: const [
+                ButtonSegment(
+                  value: WallpaperDisplayMode.fill,
+                  label: Text('Fill'),
+                  icon: Icon(Icons.crop_free_rounded),
+                ),
+                ButtonSegment(
+                  value: WallpaperDisplayMode.fit,
+                  label: Text('Fit'),
+                  icon: Icon(Icons.fit_screen_rounded),
+                ),
+                ButtonSegment(
+                  value: WallpaperDisplayMode.blur,
+                  label: Text('Blur'),
+                  icon: Icon(Icons.blur_on_rounded),
+                ),
+              ],
+              selected: {displayMode},
+              showSelectedIcon: false,
+              onSelectionChanged: (selection) =>
+                  onDisplayModeChanged(selection.first),
+            ),
           ),
-          const SizedBox(width: 8),
-          Text(
-            crop.isDefault
-                ? 'Pinch to zoom | Drag to position'
-                : '${crop.scale.toStringAsFixed(1)}x zoom | Drag to position',
-            style: Theme.of(
-              context,
-            ).textTheme.bodyMedium?.copyWith(color: WakeWallColors.muted),
+          const SizedBox(height: 12),
+          SizedBox(
+            height: 32,
+            child: displayMode == WallpaperDisplayMode.fit
+                ? _FitBackgroundSelector(
+                    selected: fitBackgroundColor,
+                    onSelected: onFitBackgroundColorChanged,
+                  )
+                : Row(
+                    mainAxisAlignment: MainAxisAlignment.center,
+                    children: [
+                      const Icon(
+                        Icons.pinch_rounded,
+                        size: 18,
+                        color: WakeWallColors.muted,
+                      ),
+                      const SizedBox(width: 8),
+                      Text(
+                        crop.isDefault
+                            ? 'Pinch to zoom | Drag to position'
+                            : '${crop.scale.toStringAsFixed(1)}x zoom | Drag to position',
+                        style: Theme.of(context).textTheme.bodyMedium?.copyWith(
+                          color: WakeWallColors.muted,
+                        ),
+                      ),
+                    ],
+                  ),
           ),
         ],
+      ),
+    );
+  }
+}
+
+class _FitBackgroundSelector extends StatelessWidget {
+  const _FitBackgroundSelector({
+    required this.selected,
+    required this.onSelected,
+  });
+
+  static const colors = [
+    Color(0xFF202124),
+    Color(0xFF000000),
+    Color(0xFFE8EAED),
+    Color(0xFF182230),
+    Color(0xFF183029),
+    Color(0xFF3A2026),
+    Color(0xFF3A2C22),
+  ];
+
+  final Color selected;
+  final ValueChanged<Color> onSelected;
+
+  @override
+  Widget build(BuildContext context) {
+    return Semantics(
+      label: 'Fit background colour',
+      child: FittedBox(
+        fit: BoxFit.scaleDown,
+        child: Row(
+          mainAxisAlignment: MainAxisAlignment.center,
+          children: [
+            Text(
+              'Border',
+              style: Theme.of(
+                context,
+              ).textTheme.bodyMedium?.copyWith(color: WakeWallColors.muted),
+            ),
+            const SizedBox(width: 12),
+            for (final color in colors)
+              Padding(
+                padding: const EdgeInsets.symmetric(horizontal: 4),
+                child: InkWell(
+                  customBorder: const CircleBorder(),
+                  onTap: () => onSelected(color),
+                  child: AnimatedContainer(
+                    duration: const Duration(milliseconds: 160),
+                    width: 28,
+                    height: 28,
+                    decoration: BoxDecoration(
+                      color: color,
+                      shape: BoxShape.circle,
+                      border: Border.all(
+                        color: color == selected
+                            ? WakeWallColors.tealStrong
+                            : WakeWallColors.outline,
+                        width: color == selected ? 3 : 1,
+                      ),
+                    ),
+                  ),
+                ),
+              ),
+          ],
+        ),
       ),
     );
   }

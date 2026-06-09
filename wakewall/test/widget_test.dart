@@ -31,10 +31,10 @@ void main() {
     await tester.tap(find.text('Add Wallpapers'));
     await tester.pumpAndSettle();
 
-    expect(find.text('Add wallpapers'), findsOneWidget);
+    expect(find.text('Add Wallpapers'), findsNWidgets(2));
     expect(find.text('Photos'), findsOneWidget);
-    expect(find.text('Files & other apps'), findsOneWidget);
-    expect(find.text('Always use my choice'), findsOneWidget);
+    expect(find.text('Files & Other Apps'), findsOneWidget);
+    expect(find.text('Always Use My Choice'), findsOneWidget);
     expect(find.text('Recommended'), findsOneWidget);
   });
 
@@ -61,7 +61,7 @@ void main() {
       find.byKey(const ValueKey('import-loading-overlay')),
       findsOneWidget,
     );
-    expect(find.text('Adding wallpapers'), findsOneWidget);
+    expect(find.text('Adding Wallpapers'), findsOneWidget);
     expect(find.text('0 of 2 processed'), findsOneWidget);
     expect(find.byType(CircularProgressIndicator), findsOneWidget);
 
@@ -109,15 +109,15 @@ void main() {
     await tester.tap(find.text('Add Wallpapers'));
     await tester.pumpAndSettle();
 
-    expect(find.text('No album'), findsOneWidget);
+    expect(find.text('No Album'), findsOneWidget);
     await tester.tap(find.text('Done'));
     await tester.pumpAndSettle();
 
-    expect(find.text('Set up WakeWall?'), findsOneWidget);
-    expect(find.text('Not now'), findsOneWidget);
-    expect(find.text('Set wallpaper'), findsOneWidget);
+    expect(find.text('Set Up WakeWall?'), findsOneWidget);
+    expect(find.text('Not Now'), findsOneWidget);
+    expect(find.text('Set Wallpaper'), findsOneWidget);
 
-    await tester.tap(find.text('Set wallpaper'));
+    await tester.tap(find.text('Set Wallpaper'));
     await tester.pumpAndSettle();
     expect(bridge.openedWallpaperPicker, isTrue);
   });
@@ -133,8 +133,8 @@ void main() {
     await tester.pumpAndSettle();
 
     expect(find.text('Shuffle'), findsOneWidget);
-    expect(find.text('In order'), findsOneWidget);
-    expect(find.text('Photo source'), findsOneWidget);
+    expect(find.text('In Order'), findsOneWidget);
+    expect(find.text('Photo Source'), findsOneWidget);
     expect(find.text('Ask'), findsOneWidget);
     expect(find.text('Files'), findsOneWidget);
     expect(find.text('Fit mode'), findsNothing);
@@ -142,7 +142,7 @@ void main() {
     expect(find.text('Restore'), findsOneWidget);
     expect(find.text('Use WakeWall'), findsOneWidget);
     expect(find.text('Wake-event diagnostics'), findsNothing);
-    expect(find.text('Wallpaper scrolling'), findsOneWidget);
+    expect(find.text('Wallpaper Scrolling'), findsOneWidget);
   });
 
   testWidgets('settings clearly reports when WakeWall is active', (
@@ -155,7 +155,7 @@ void main() {
     await tester.tap(find.byTooltip('Settings'));
     await tester.pumpAndSettle();
 
-    expect(find.text('WakeWall is active'), findsOneWidget);
+    expect(find.text('WakeWall Is Active'), findsOneWidget);
     expect(find.text('Use WakeWall'), findsNothing);
   });
 
@@ -173,7 +173,7 @@ void main() {
     await tester.tap(find.byType(Switch).last);
     await tester.pumpAndSettle();
 
-    expect(find.text('Enable wallpaper scrolling?'), findsOneWidget);
+    expect(find.text('Enable Wallpaper Scrolling?'), findsOneWidget);
     expect(controller.wallpaperScrolling, isFalse);
     expect(bridge.wallpaperScrolling, isFalse);
 
@@ -200,7 +200,7 @@ void main() {
 
     bridge.confirmLocation();
     await tester.pump(const Duration(milliseconds: 350));
-    expect(find.text('Creating backup'), findsOneWidget);
+    expect(find.text('Creating Backup'), findsOneWidget);
 
     bridge.finishBackup();
     await tester.pumpAndSettle();
@@ -235,7 +235,7 @@ void main() {
     await tester.tap(find.text('Restore'));
     await tester.pumpAndSettle();
 
-    expect(find.text('Replace current setup?'), findsOneWidget);
+    expect(find.text('Replace Current Setup?'), findsOneWidget);
     expect(
       find.text(
         'Restoring a backup will replace your current wallpapers, order, crops, and settings.',
@@ -245,7 +245,7 @@ void main() {
 
     await tester.tap(find.text('Cancel'));
     await tester.pumpAndSettle();
-    expect(find.text('Replace current setup?'), findsNothing);
+    expect(find.text('Replace Current Setup?'), findsNothing);
   });
 
   testWidgets('WakeWall renders the populated home screen', (tester) async {
@@ -411,10 +411,13 @@ void main() {
     await tester.pumpWidget(WakeWallApp(controller: controller));
     await tester.pumpAndSettle();
 
-    await tester.tap(find.byTooltip('Adjust crop'));
+    await tester.tap(find.byTooltip('Adjust Crop'));
     await tester.pumpAndSettle();
 
-    expect(find.text('Adjust crop'), findsOneWidget);
+    expect(find.text('Adjust Wallpaper'), findsOneWidget);
+    expect(find.text('Fill'), findsOneWidget);
+    expect(find.text('Fit'), findsOneWidget);
+    expect(find.text('Blur'), findsOneWidget);
     expect(find.text('Pinch to zoom | Drag to position'), findsOneWidget);
 
     final center = tester.getCenter(
@@ -431,11 +434,11 @@ void main() {
     await secondFinger.up();
     await tester.pumpAndSettle();
 
-    expect(find.byTooltip('Reset crop'), findsOneWidget);
+    expect(find.byTooltip('Reset wallpaper'), findsOneWidget);
     await tester.tap(find.text('Cancel'));
     await tester.pumpAndSettle();
-    expect(find.text('Adjust crop'), findsNothing);
-    expect(find.byTooltip('Adjust crop'), findsOneWidget);
+    expect(find.text('Adjust Wallpaper'), findsNothing);
+    expect(find.byTooltip('Adjust Crop'), findsOneWidget);
   });
 }
 

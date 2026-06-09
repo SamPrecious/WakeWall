@@ -473,16 +473,22 @@ class WakeWallService : WallpaperService() {
                 rendered.recycle()
             }
             val crop = store.crop(index)
+            val displayMode = store.displayMode(index)
             val bitmap = decodePhoto(
                 uriValue,
                 canvas.width,
                 canvas.height,
                 crop.scale,
+                displayMode,
             ) ?: return false
-            canvas.drawColor(Color.BLACK)
+            canvas.drawColor(
+                if (displayMode == "fit") store.fitBackgroundColor(index)
+                else Color.rgb(32, 33, 36),
+            )
+            if (displayMode == "blur") WakeWallBlurRenderer.draw(canvas, bitmap, width, height)
             canvas.save()
 
-            val scale = if (store.fit == "fitEntireImage") {
+            val scale = if (displayMode == "fit" || displayMode == "blur") {
                 min(width / bitmap.width, height / bitmap.height)
             } else {
                 max(width / bitmap.width, height / bitmap.height)
@@ -527,6 +533,7 @@ class WakeWallService : WallpaperService() {
             targetWidth: Int,
             targetHeight: Int,
             cropScale: Float,
+            displayMode: String,
         ): Bitmap? {
             return runCatching {
                 val localFile = store.localFile(uriValue)
@@ -543,7 +550,7 @@ class WakeWallService : WallpaperService() {
                         val heightScale =
                             targetHeight * qualityScale / info.size.height.toFloat()
                         val scale = (
-                            if (store.fit == "fitEntireImage") {
+                            if (displayMode == "fit" || displayMode == "blur") {
                                 min(widthScale, heightScale)
                             } else {
                                 max(widthScale, heightScale)

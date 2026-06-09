@@ -90,9 +90,21 @@ class WakeWallController extends ChangeNotifier {
   }
 
   // Saves a crop in the app and sends the same position to Android.
-  Future<void> updateCrop(int index, WallpaperCrop crop) async {
+  Future<void> updateCrop(
+    int index,
+    WallpaperCrop crop, {
+    WallpaperDisplayMode? displayMode,
+    Color? fitBackgroundColor,
+  }) async {
     if (index < 0 || index >= _wallpapers.length) return;
-    _wallpapers[index] = _wallpapers[index].copyWith(crop: crop);
+    final selectedMode = displayMode ?? _wallpapers[index].displayMode;
+    final selectedFitColor =
+        fitBackgroundColor ?? _wallpapers[index].fitBackgroundColor;
+    _wallpapers[index] = _wallpapers[index].copyWith(
+      crop: crop,
+      displayMode: selectedMode,
+      fitBackgroundColor: selectedFitColor,
+    );
     notifyListeners();
     await _runNative(() async {
       final updated = _wallpaperFromNative(
@@ -101,6 +113,8 @@ class WakeWallController extends ChangeNotifier {
           scale: crop.scale,
           offsetX: crop.offsetX,
           offsetY: crop.offsetY,
+          displayMode: selectedMode.name,
+          fitBackgroundColor: selectedFitColor.toARGB32(),
         ),
       );
       if (updated != null) {
@@ -474,9 +488,18 @@ class WakeWallController extends ChangeNotifier {
           .clamp(-4, 4)
           .toDouble(),
     );
+    final displayMode = WallpaperDisplayMode.values.firstWhere(
+      (mode) => mode.name == data['displayMode'],
+      orElse: () => WallpaperDisplayMode.fill,
+    );
+    final fitBackgroundColor = Color(
+      (data['fitBackgroundColor'] as num?)?.toInt() ?? 0xFF202124,
+    );
     if (sampleIndex != null) {
       return bundledWallpapers[sampleIndex % bundledWallpapers.length].copyWith(
         crop: crop,
+        displayMode: displayMode,
+        fitBackgroundColor: fitBackgroundColor,
       );
     }
     final uri = data['uri'] as String?;
@@ -493,6 +516,8 @@ class WakeWallController extends ChangeNotifier {
       imageWidth: (data['imageWidth'] as num?)?.toInt(),
       imageHeight: (data['imageHeight'] as num?)?.toInt(),
       crop: crop,
+      displayMode: displayMode,
+      fitBackgroundColor: fitBackgroundColor,
       albumIds: (data['albumIds'] as List<Object?>? ?? const [])
           .whereType<String>()
           .toSet(),

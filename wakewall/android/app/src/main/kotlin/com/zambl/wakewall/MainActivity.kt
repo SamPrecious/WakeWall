@@ -238,6 +238,10 @@ class MainActivity : FlutterFragmentActivity() {
                                 scale = call.argument<Double>("scale") ?: 1.0,
                                 offsetX = call.argument<Double>("offsetX") ?: 0.0,
                                 offsetY = call.argument<Double>("offsetY") ?: 0.0,
+                                displayMode = call.argument<String>("displayMode") ?: "fill",
+                                fitBackgroundColor =
+                                    call.argument<Number>("fitBackgroundColor")?.toLong()?.toInt()
+                                        ?: 0xFF202124.toInt(),
                             )
                             sendBroadcast(
                                 Intent(WakeWallService.ACTION_CROP_UPDATED).setPackage(packageName)

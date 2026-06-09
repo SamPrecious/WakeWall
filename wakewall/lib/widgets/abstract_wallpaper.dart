@@ -1,5 +1,6 @@
 import 'dart:math' as math;
 import 'dart:typed_data';
+import 'dart:ui' as ui;
 
 import 'package:flutter/material.dart';
 
@@ -10,6 +11,8 @@ class AbstractWallpaper extends StatelessWidget {
     required this.wallpaper,
     this.borderRadius = BorderRadius.zero,
     this.crop,
+    this.displayMode,
+    this.fitBackgroundColor,
     this.previewBytes,
     this.applyCrop = true,
     super.key,
@@ -18,6 +21,8 @@ class AbstractWallpaper extends StatelessWidget {
   final Wallpaper wallpaper;
   final BorderRadius borderRadius;
   final WallpaperCrop? crop;
+  final WallpaperDisplayMode? displayMode;
+  final Color? fitBackgroundColor;
   final Uint8List? previewBytes;
   final bool applyCrop;
 
@@ -28,6 +33,9 @@ class AbstractWallpaper extends StatelessWidget {
       child: LayoutBuilder(
         builder: (context, constraints) {
           final activeCrop = crop ?? wallpaper.crop;
+          final activeMode = displayMode ?? wallpaper.displayMode;
+          final activeFitColor =
+              fitBackgroundColor ?? wallpaper.fitBackgroundColor;
           final imageBytes = previewBytes ?? wallpaper.thumbnail;
           if (imageBytes != null && !applyCrop) {
             return Image.memory(
@@ -43,6 +51,74 @@ class AbstractWallpaper extends StatelessWidget {
               imageBytes != null &&
               wallpaper.imageWidth != null &&
               wallpaper.imageHeight != null;
+          if (imageBytes != null && activeMode != WallpaperDisplayMode.fill) {
+            final sourceWidth =
+                wallpaper.imageWidth?.toDouble() ?? constraints.maxWidth;
+            final sourceHeight =
+                wallpaper.imageHeight?.toDouble() ?? constraints.maxHeight;
+            final containScale = math.min(
+              constraints.maxWidth / sourceWidth,
+              constraints.maxHeight / sourceHeight,
+            );
+            final drawnWidth = sourceWidth * containScale;
+            final drawnHeight = sourceHeight * containScale;
+            final maxOffsetX = math.max(
+              0.0,
+              (drawnWidth * activeCrop.scale - constraints.maxWidth) /
+                  (2 * constraints.maxWidth),
+            );
+            final maxOffsetY = math.max(
+              0.0,
+              (drawnHeight * activeCrop.scale - constraints.maxHeight) /
+                  (2 * constraints.maxHeight),
+            );
+            return Stack(
+              fit: StackFit.expand,
+              children: [
+                if (activeMode == WallpaperDisplayMode.blur)
+                  ImageFiltered(
+                    imageFilter: ui.ImageFilter.blur(sigmaX: 24, sigmaY: 24),
+                    child: Transform.scale(
+                      scale: 1.12,
+                      child: Image.memory(
+                        imageBytes,
+                        fit: BoxFit.cover,
+                        gaplessPlayback: true,
+                        filterQuality: FilterQuality.medium,
+                      ),
+                    ),
+                  )
+                else
+                  ColoredBox(color: activeFitColor),
+                OverflowBox(
+                  alignment: Alignment.center,
+                  maxWidth: double.infinity,
+                  maxHeight: double.infinity,
+                  child: Transform.translate(
+                    offset: Offset(
+                      constraints.maxWidth *
+                          activeCrop.offsetX.clamp(-maxOffsetX, maxOffsetX),
+                      constraints.maxHeight *
+                          activeCrop.offsetY.clamp(-maxOffsetY, maxOffsetY),
+                    ),
+                    child: Transform.scale(
+                      scale: activeCrop.scale,
+                      child: SizedBox(
+                        width: drawnWidth,
+                        height: drawnHeight,
+                        child: Image.memory(
+                          imageBytes,
+                          fit: BoxFit.contain,
+                          gaplessPlayback: true,
+                          filterQuality: FilterQuality.high,
+                        ),
+                      ),
+                    ),
+                  ),
+                ),
+              ],
+            );
+          }
           if (imageBytes != null && useFullSource) {
             final sourceWidth = wallpaper.imageWidth!.toDouble();
             final sourceHeight = wallpaper.imageHeight!.toDouble();

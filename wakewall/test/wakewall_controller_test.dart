@@ -1,6 +1,7 @@
 import 'dart:typed_data';
 import 'dart:convert';
 
+import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:wakewall/controllers/wakewall_controller.dart';
 import 'package:wakewall/models/wallpaper.dart';
@@ -105,9 +106,16 @@ void main() {
     await controller.updateCrop(
       0,
       const WallpaperCrop(scale: 1.5, offsetX: .1, offsetY: -.1),
+      displayMode: WallpaperDisplayMode.blur,
+      fitBackgroundColor: const Color(0xFF182230),
     );
 
     expect(controller.wallpapers.first.crop.scale, 1.5);
+    expect(controller.wallpapers.first.displayMode, WallpaperDisplayMode.blur);
+    expect(
+      controller.wallpapers.first.fitBackgroundColor,
+      const Color(0xFF182230),
+    );
     expect(controller.wallpapers.first.mainPreview, bridge.croppedPreviewBytes);
     expect(controller.wallpapers.first.thumbnail, bridge.croppedThumbnailBytes);
   });
@@ -310,11 +318,15 @@ class _FakeNativeWallpaperBridge extends NativeWallpaperBridge {
     required double scale,
     required double offsetX,
     required double offsetY,
+    required String displayMode,
+    required int fitBackgroundColor,
   }) async => {
     ...wallpapers[index],
     'mainPreview': croppedPreviewBytes,
     'thumbnail': croppedThumbnailBytes,
     'crop': {'scale': scale, 'offsetX': offsetX, 'offsetY': offsetY},
+    'displayMode': displayMode,
+    'fitBackgroundColor': fitBackgroundColor,
   };
 }
 

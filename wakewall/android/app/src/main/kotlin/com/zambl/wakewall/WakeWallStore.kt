@@ -476,18 +476,27 @@ class WakeWallStore(context: Context) {
             .apply()
     }
 
-    fun setCrop(index: Int, scale: Double, offsetX: Double, offsetY: Double) {
-        val value = wallpaperAt(index)
-        val key = cropKey(index)
+    fun setCrop(
+        index: Int,
+        scale: Double,
+        offsetX: Double,
+        offsetY: Double,
+        displayMode: String,
+        fitBackgroundColor: Int,
+    ) {
+        val value = wallpaperAt(index) ?: return
+        val key = cropKey(value)
         prefs.edit()
             .putFloat("${key}_scale", scale.toFloat())
             .putFloat("${key}_x", offsetX.toFloat())
             .putFloat("${key}_y", offsetY.toFloat())
-            .remove("${legacyCropKey(index)}_scale")
-            .remove("${legacyCropKey(index)}_x")
-            .remove("${legacyCropKey(index)}_y")
+            .putString(displayModeKey(value), normalizedDisplayMode(displayMode))
+            .putInt(fitBackgroundColorKey(value), fitBackgroundColor or 0xFF000000.toInt())
+            .remove("${legacyCropKey(value)}_scale")
+            .remove("${legacyCropKey(value)}_x")
+            .remove("${legacyCropKey(value)}_y")
             .apply()
-        if (value != null) deleteCachedPreviews(value)
+        deleteCachedPreviews(value)
     }
 
     fun crop(index: Int): CropTransform {
@@ -504,6 +513,24 @@ class WakeWallStore(context: Context) {
             offsetY = floatPreference("${key}_y", "${legacyKey}_y", 0f),
         )
     }
+
+    fun displayMode(index: Int): String =
+        wallpaperAt(index)?.let(::displayMode) ?: DISPLAY_MODE_FILL
+
+    private fun displayMode(value: String): String =
+        normalizedDisplayMode(
+            prefs.getString(displayModeKey(value), null)
+                ?: if (fit == "fitEntireImage") DISPLAY_MODE_FIT else DISPLAY_MODE_FILL,
+        )
+
+    private fun normalizedDisplayMode(value: String): String =
+        value.takeIf { it in DISPLAY_MODES } ?: DISPLAY_MODE_FILL
+
+    fun fitBackgroundColor(index: Int): Int =
+        wallpaperAt(index)?.let(::fitBackgroundColor) ?: DEFAULT_FIT_BACKGROUND_COLOR
+
+    private fun fitBackgroundColor(value: String): Int =
+        prefs.getInt(fitBackgroundColorKey(value), DEFAULT_FIT_BACKGROUND_COLOR)
 
     fun configuration(): Map<String, Any> {
         migrateExternalImages()
@@ -567,6 +594,8 @@ class WakeWallStore(context: Context) {
                         .put("file", entryName)
                         .put("name", displayName(value))
                         .put("crop", JSONObject(crop(value).asMap()))
+                        .put("displayMode", displayMode(value))
+                        .put("fitBackgroundColor", fitBackgroundColor(value).toLong() and 0xffffffffL)
                         .put("albumIds", JSONArray(albumIds(value).toList())),
                 )
             }
@@ -657,6 +686,11 @@ class WakeWallStore(context: Context) {
                             crop.optDouble("offsetX", 0.0).toFloat().coerceIn(-4f, 4f),
                             crop.optDouble("offsetY", 0.0).toFloat().coerceIn(-4f, 4f),
                         ),
+                        displayMode = normalizedDisplayMode(item.optString("displayMode", DISPLAY_MODE_FILL)),
+                        fitBackgroundColor = item.optLong(
+                            "fitBackgroundColor",
+                            DEFAULT_FIT_BACKGROUND_COLOR.toLong() and 0xffffffffL,
+                        ).toInt(),
                         albumIds = item.getJSONArray("albumIds").let { ids ->
                             List(ids.length()) { ids.getString(it) }
                                 .filterTo(linkedSetOf()) { it in restoredAlbumIds }
@@ -702,6 +736,8 @@ class WakeWallStore(context: Context) {
                     .remove("${legacyCropKey(value)}_scale")
                     .remove("${legacyCropKey(value)}_x")
                     .remove("${legacyCropKey(value)}_y")
+                    .remove(displayModeKey(value))
+                    .remove(fitBackgroundColorKey(value))
                     .remove(albumKey(value))
             }
             newValues.zip(restored).forEach { (value, restoredWallpaper) ->
@@ -710,6 +746,8 @@ class WakeWallStore(context: Context) {
                     .putFloat("${cropKey(value)}_scale", restoredWallpaper.crop.scale)
                     .putFloat("${cropKey(value)}_x", restoredWallpaper.crop.offsetX)
                     .putFloat("${cropKey(value)}_y", restoredWallpaper.crop.offsetY)
+                    .putString(displayModeKey(value), restoredWallpaper.displayMode)
+                    .putInt(fitBackgroundColorKey(value), restoredWallpaper.fitBackgroundColor)
                     .putString(albumKey(value), JSONArray(restoredWallpaper.albumIds.toList()).toString())
             }
             editor.apply()
@@ -796,6 +834,8 @@ class WakeWallStore(context: Context) {
 
     private fun nameKey(value: String): String = "name_${storageKey(value)}"
     private fun albumKey(value: String): String = "albums_${storageKey(value)}"
+    private fun displayModeKey(value: String): String = "display_mode_${storageKey(value)}"
+    private fun fitBackgroundColorKey(value: String): String = "fit_background_${storageKey(value)}"
 
     private fun legacyNameKey(value: String): String = "name_${value.hashCode()}"
 
@@ -817,6 +857,8 @@ class WakeWallStore(context: Context) {
             .remove("${legacyCropKey(value)}_scale")
             .remove("${legacyCropKey(value)}_x")
             .remove("${legacyCropKey(value)}_y")
+            .remove(displayModeKey(value))
+            .remove(fitBackgroundColorKey(value))
             .remove(albumKey(value))
             .apply()
     }
@@ -825,6 +867,8 @@ class WakeWallStore(context: Context) {
     private fun wallpaperMap(index: Int, value: String): Map<String, Any> {
         val result = mutableMapOf<String, Any>(
             "crop" to crop(value).asMap(),
+            "displayMode" to displayMode(value),
+            "fitBackgroundColor" to (fitBackgroundColor(value).toLong() and 0xffffffffL),
             "albumIds" to albumIds(value).toList(),
         )
         if (value.startsWith(SAMPLE_PREFIX)) {
@@ -966,6 +1010,7 @@ class WakeWallStore(context: Context) {
         val outputHeight = targetHeight
             ?: max(1, (targetWidth * screenHeight.toFloat() / screenWidth).roundToInt())
         val crop = crop(value)
+        val displayMode = displayMode(value)
         val source = fullAspectPreview(
             value,
             (max(targetWidth, outputHeight) * crop.scale.coerceIn(1f, 4f))
@@ -973,13 +1018,23 @@ class WakeWallStore(context: Context) {
         ) ?: return null
         val snapshot = Bitmap.createBitmap(targetWidth, outputHeight, Bitmap.Config.ARGB_8888)
         val canvas = Canvas(snapshot)
-        canvas.drawColor(Color.BLACK)
+        canvas.drawColor(
+            if (displayMode == DISPLAY_MODE_FIT) fitBackgroundColor(value)
+            else DEFAULT_FIT_BACKGROUND_COLOR,
+        )
 
         val width = targetWidth.toFloat()
         val height = outputHeight.toFloat()
-        val scale = max(width / source.width, height / source.height)
+        val scale = if (displayMode == DISPLAY_MODE_FILL) {
+            max(width / source.width, height / source.height)
+        } else {
+            min(width / source.width, height / source.height)
+        }
         val drawnWidth = source.width * scale
         val drawnHeight = source.height * scale
+        if (displayMode == DISPLAY_MODE_BLUR) {
+            WakeWallBlurRenderer.draw(canvas, source, width, height)
+        }
         val maxOffsetX = max(0f, (drawnWidth * crop.scale - width) / (2f * width))
         val maxOffsetY = max(0f, (drawnHeight * crop.scale - height) / (2f * height))
         canvas.save()
@@ -1408,6 +1463,8 @@ class WakeWallStore(context: Context) {
         val original = localFile(value) ?: return null
         val name = displayName(value)
         val savedCrop = crop(value)
+        val savedDisplayMode = displayMode(value)
+        val savedFitBackgroundColor = fitBackgroundColor(value)
         val savedAlbums = albumIds(value)
         val replacement = File(original.parentFile, "${UUID.randomUUID()}.jpg")
         val decoded = runCatching {
@@ -1436,6 +1493,8 @@ class WakeWallStore(context: Context) {
             .putFloat("${cropKey(replacementValue)}_scale", savedCrop.scale)
             .putFloat("${cropKey(replacementValue)}_x", savedCrop.offsetX)
             .putFloat("${cropKey(replacementValue)}_y", savedCrop.offsetY)
+            .putString(displayModeKey(replacementValue), savedDisplayMode)
+            .putInt(fitBackgroundColorKey(replacementValue), savedFitBackgroundColor)
             .putString(albumKey(replacementValue), JSONArray(savedAlbums.toList()).toString())
             .apply()
         deleteMetadata(value)
@@ -1506,6 +1565,11 @@ class WakeWallStore(context: Context) {
         private const val MAX_BACKUP_TOTAL_BYTES = 2L * 1024 * 1024 * 1024
         private const val MAX_FALLBACK_BYTES = 64L * 1024 * 1024
         private const val MAX_ORIGINAL_IMAGE_BYTES = 256L * 1024 * 1024
+        private const val DISPLAY_MODE_FILL = "fill"
+        private const val DISPLAY_MODE_FIT = "fit"
+        private const val DISPLAY_MODE_BLUR = "blur"
+        private const val DEFAULT_FIT_BACKGROUND_COLOR = 0xFF202124.toInt()
+        private val DISPLAY_MODES = setOf(DISPLAY_MODE_FILL, DISPLAY_MODE_FIT, DISPLAY_MODE_BLUR)
         const val REMOVAL_UNDO_WINDOW_MS = 3_000L
     }
 }
@@ -1514,6 +1578,8 @@ data class RestoredWallpaper(
     val source: File,
     val name: String,
     val crop: CropTransform,
+    val displayMode: String,
+    val fitBackgroundColor: Int,
     val albumIds: Set<String>,
 )
 

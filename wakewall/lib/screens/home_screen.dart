@@ -212,7 +212,7 @@ class _HomeScreenState extends State<HomeScreen> {
               if (importingImages)
                 _OperationOverlay(
                   overlayKey: const ValueKey('import-loading-overlay'),
-                  title: 'Adding wallpapers',
+                  title: 'Adding Wallpapers',
                   description:
                       importProgress == null || importProgress!.total < 1
                       ? 'Preparing your photos...'
@@ -376,18 +376,18 @@ Future<void> _offerWallpaperSetupIfNeeded(
     builder: (context) => AlertDialog(
       backgroundColor: WakeWallColors.surface,
       icon: const Icon(Icons.wallpaper_rounded),
-      title: const Text('Set up WakeWall?'),
+      title: const Text('Set Up WakeWall?'),
       content: const Text(
         'Your wallpapers are ready. Set WakeWall as your live wallpaper to rotate them automatically.',
       ),
       actions: [
         TextButton(
           onPressed: () => Navigator.pop(context, false),
-          child: const Text('Not now'),
+          child: const Text('Not Now'),
         ),
         FilledButton(
           onPressed: () => Navigator.pop(context, true),
-          child: const Text('Set wallpaper'),
+          child: const Text('Set Wallpaper'),
         ),
       ],
     ),
@@ -603,19 +603,19 @@ class _Preview extends StatelessWidget {
                           children: [
                             _OverlayButton(
                               icon: Icons.photo_album_outlined,
-                              tooltip: 'Add to albums',
+                              tooltip: 'Add to Albums',
                               onTap: onAlbums,
                             ),
                             const SizedBox(width: 8),
                             _OverlayButton(
                               icon: Icons.crop_rounded,
-                              tooltip: 'Adjust crop',
+                              tooltip: 'Adjust Crop',
                               onTap: onCrop,
                             ),
                             const SizedBox(width: 8),
                             _OverlayButton(
                               icon: Icons.shuffle_rounded,
-                              tooltip: 'Next wallpaper',
+                              tooltip: 'Next Wallpaper',
                               onTap: controller.next,
                             ),
                           ],
@@ -643,7 +643,7 @@ class _Preview extends StatelessWidget {
                     builder: (context, candidates, _) {
                       final removing = candidates.isNotEmpty;
                       return Semantics(
-                        label: 'Remove wallpaper',
+                        label: 'Remove Wallpaper',
                         hint: 'Drop the wallpaper here to remove it',
                         child: AnimatedContainer(
                           key: const ValueKey('wallpaper-remove-target'),
@@ -688,7 +688,7 @@ class _EmptyPreview extends StatelessWidget {
       color: Colors.transparent,
       child: Semantics(
         button: true,
-        label: 'Add wallpapers',
+        label: 'Add Wallpapers',
         hint: 'Choose photos for WakeWall',
         child: InkWell(
           key: const ValueKey('empty-add-wallpapers'),
@@ -989,19 +989,19 @@ class _AlbumsSheetState extends State<_AlbumsSheet> {
                 const Spacer(),
                 IconButton(
                   onPressed: _createAlbum,
-                  tooltip: 'Create album',
+                  tooltip: 'Create Album',
                   icon: const Icon(Icons.add_rounded),
                 ),
                 IconButton(
                   onPressed: () => Navigator.pop(context),
-                  tooltip: 'Close albums',
+                  tooltip: 'Close Albums',
                   icon: const Icon(Icons.close_rounded),
                 ),
               ],
             ),
             const SizedBox(height: 10),
             _AlbumFilterTile(
-              title: 'All wallpapers',
+              title: 'All Wallpapers',
               icon: Icons.photo_library_outlined,
               selected: controller.activeAlbumIds.isEmpty,
               onTap: () => controller.setActiveAlbums({}),
@@ -1037,7 +1037,7 @@ class _AlbumsSheetState extends State<_AlbumsSheet> {
   }
 
   Future<void> _createAlbum() async {
-    final name = await _albumNameDialog(context, title: 'New album');
+    final name = await _albumNameDialog(context, title: 'New Album');
     if (name != null) await controller.createAlbum(name);
   }
 
@@ -1054,7 +1054,7 @@ class _AlbumsSheetState extends State<_AlbumsSheet> {
             ),
             ListTile(
               leading: const Icon(Icons.delete_outline_rounded),
-              title: const Text('Delete album'),
+              title: const Text('Delete Album'),
               onTap: () => Navigator.pop(context, 'delete'),
             ),
           ],
@@ -1065,7 +1065,7 @@ class _AlbumsSheetState extends State<_AlbumsSheet> {
     if (action == 'rename') {
       final name = await _albumNameDialog(
         context,
-        title: 'Rename album',
+        title: 'Rename Album',
         initialValue: album.name,
       );
       if (name != null) await controller.renameAlbum(album.id, name);
@@ -1081,11 +1081,11 @@ class _AlbumsSheetState extends State<_AlbumsSheet> {
           actions: [
             TextButton(
               onPressed: () => Navigator.pop(context, false),
-              child: const Text('Album only'),
+              child: const Text('Album Only'),
             ),
             FilledButton(
               onPressed: () => Navigator.pop(context, true),
-              child: const Text('Album & photos'),
+              child: const Text('Album & Photos'),
             ),
           ],
         ),
@@ -1134,7 +1134,7 @@ class _AssignAlbumsSheetState extends State<_AssignAlbumsSheet> {
               const Spacer(),
               IconButton(
                 onPressed: _createAlbum,
-                tooltip: 'Create album',
+                tooltip: 'Create Album',
                 icon: const Icon(Icons.add_rounded),
               ),
             ],
@@ -1143,7 +1143,7 @@ class _AssignAlbumsSheetState extends State<_AssignAlbumsSheet> {
           if (widget.isImport)
             CheckboxListTile(
               contentPadding: EdgeInsets.zero,
-              title: const Text('No album'),
+              title: const Text('No Album'),
               value: selected.isEmpty,
               onChanged: (_) => setState(selected.clear),
             ),
@@ -1161,7 +1161,7 @@ class _AssignAlbumsSheetState extends State<_AssignAlbumsSheet> {
           if (widget.controller.albums.isEmpty)
             Text(
               widget.isImport
-                  ? 'No albums yet. These wallpapers will remain in All wallpapers.'
+                  ? 'No albums yet. These wallpapers will remain in All Wallpapers.'
                   : 'No albums yet.',
               style: Theme.of(
                 context,
@@ -1170,7 +1170,7 @@ class _AssignAlbumsSheetState extends State<_AssignAlbumsSheet> {
           if (widget.isImport) ...[
             const SizedBox(height: 10),
             _RememberChoiceTile(
-              label: "Don't ask me again",
+              label: "Don't Ask Me Again",
               description: 'You can change this later in Settings',
               value: remember,
               onChanged: (value) => setState(() => remember = value),
@@ -1195,7 +1195,7 @@ class _AssignAlbumsSheetState extends State<_AssignAlbumsSheet> {
 
   Future<void> _createAlbum() async {
     final existing = widget.controller.albums.map((album) => album.id).toSet();
-    final name = await _albumNameDialog(context, title: 'New album');
+    final name = await _albumNameDialog(context, title: 'New Album');
     if (name == null) return;
     await widget.controller.createAlbum(name);
     WallpaperAlbum? created;
@@ -1255,6 +1255,7 @@ Future<String?> _albumNameDialog(
         controller: textController,
         autofocus: true,
         maxLength: 40,
+        textCapitalization: TextCapitalization.words,
         decoration: const InputDecoration(hintText: 'Album name'),
       ),
       actions: [
@@ -1312,7 +1313,7 @@ class _SettingsSheetState extends State<_SettingsSheet> {
                       const Spacer(),
                       IconButton(
                         onPressed: () => Navigator.pop(context),
-                        tooltip: 'Close settings',
+                        tooltip: 'Close Settings',
                         icon: const Icon(
                           Icons.close_rounded,
                           color: Color(0xFFE3E3E8),
@@ -1324,7 +1325,7 @@ class _SettingsSheetState extends State<_SettingsSheet> {
                   _SegmentedSetting(
                     label: 'Order',
                     icon: Icons.shuffle_rounded,
-                    options: const ['Shuffle', 'In order'],
+                    options: const ['Shuffle', 'In Order'],
                     selectedIndex: controller.order == RotationOrder.shuffle
                         ? 0
                         : 1,
@@ -1336,7 +1337,7 @@ class _SettingsSheetState extends State<_SettingsSheet> {
                   ),
                   const SizedBox(height: 10),
                   _SegmentedSetting(
-                    label: 'Photo source',
+                    label: 'Photo Source',
                     icon: Icons.add_photo_alternate_outlined,
                     options: const ['Ask', 'Photos', 'Files'],
                     selectedIndex: controller.photoSource.index,
@@ -1345,8 +1346,8 @@ class _SettingsSheetState extends State<_SettingsSheet> {
                   ),
                   const SizedBox(height: 10),
                   _SwitchTile(
-                    label: 'Ask which albums',
-                    description: 'Choose albums after adding wallpapers',
+                    label: 'Choose Albums After Import',
+                    description: 'Ask where new wallpapers should be added',
                     value: controller.askAlbumsAfterImport,
                     onChanged: (value) => controller.setImportAlbumPreference(
                       value,
@@ -1362,7 +1363,7 @@ class _SettingsSheetState extends State<_SettingsSheet> {
                   ),
                   const SizedBox(height: 10),
                   _SwitchTile(
-                    label: 'Wallpaper scrolling',
+                    label: 'Wallpaper Scrolling',
                     description: 'Move the wallpaper as you swipe Home screens',
                     value: controller.wallpaperScrolling,
                     onChanged: _setWallpaperScrolling,
@@ -1403,7 +1404,7 @@ class _SettingsSheetState extends State<_SettingsSheet> {
                     ),
                     label: Text(
                       controller.wakeWallActive
-                          ? 'WakeWall is active'
+                          ? 'WakeWall Is Active'
                           : 'Use WakeWall',
                     ),
                   ),
@@ -1414,7 +1415,7 @@ class _SettingsSheetState extends State<_SettingsSheet> {
               _OperationOverlay(
                 overlayKey: const ValueKey('backup-loading-overlay'),
                 title: fileProgressTitle,
-                description: fileProgressTitle == 'Restoring backup'
+                description: fileProgressTitle == 'Restoring Backup'
                     ? 'Recovering your wallpapers and settings...'
                     : 'Saving your wallpapers and settings...',
               ),
@@ -1430,7 +1431,7 @@ class _SettingsSheetState extends State<_SettingsSheet> {
         context: context,
         builder: (context) => AlertDialog(
           backgroundColor: WakeWallColors.surface,
-          title: const Text('Replace current setup?'),
+          title: const Text('Replace Current Setup?'),
           content: const Text(
             'Restoring a backup will replace your current wallpapers, order, crops, and settings.',
           ),
@@ -1441,7 +1442,7 @@ class _SettingsSheetState extends State<_SettingsSheet> {
             ),
             FilledButton(
               onPressed: () => Navigator.pop(context, true),
-              child: const Text('Restore backup'),
+              child: const Text('Restore Backup'),
             ),
           ],
         ),
@@ -1450,7 +1451,7 @@ class _SettingsSheetState extends State<_SettingsSheet> {
     }
 
     setState(() => handlingBackup = true);
-    fileProgressTitle = restore ? 'Restoring backup' : 'Creating backup';
+    fileProgressTitle = restore ? 'Restoring Backup' : 'Creating Backup';
     void beginProgressDelay() {
       fileProgressTimer ??= Timer(_HomeScreenState.importOverlayDelay, () {
         if (mounted) setState(() => showingFileProgress = true);
@@ -1503,7 +1504,7 @@ class _SettingsSheetState extends State<_SettingsSheet> {
       context: context,
       builder: (context) => AlertDialog(
         backgroundColor: WakeWallColors.surface,
-        title: const Text('Enable wallpaper scrolling?'),
+        title: const Text('Enable Wallpaper Scrolling?'),
         content: const Text(
           'WakeWall will prepare wider wallpaper copies. This uses more storage and may reduce performance on some devices.',
         ),
@@ -1556,7 +1557,7 @@ class _AddSourceSheetState extends State<_AddSourceSheet> {
         mainAxisSize: MainAxisSize.min,
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          Text('Add wallpapers', style: Theme.of(context).textTheme.titleLarge),
+          Text('Add Wallpapers', style: Theme.of(context).textTheme.titleLarge),
           const SizedBox(height: 4),
           Text(
             'Choose where WakeWall should look.',
@@ -1575,13 +1576,13 @@ class _AddSourceSheetState extends State<_AddSourceSheet> {
           const SizedBox(height: 10),
           _SourceOption(
             icon: Icons.folder_outlined,
-            title: 'Files & other apps',
+            title: 'Files & Other Apps',
             description: 'Browse Gallery, Downloads, and file providers',
             onTap: () => _select(PhotoSource.files),
           ),
           const SizedBox(height: 14),
           _RememberChoiceTile(
-            label: 'Always use my choice',
+            label: 'Always Use My Choice',
             description: 'You can change this later in Settings',
             value: remember,
             onChanged: (value) => setState(() => remember = value),
