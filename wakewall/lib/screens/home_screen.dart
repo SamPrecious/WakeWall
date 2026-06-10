@@ -128,33 +128,37 @@ class _HomeScreenState extends State<HomeScreen> {
               SafeArea(
                 child: LayoutBuilder(
                   builder: (context, constraints) {
-                    final compact = constraints.maxHeight < 720;
+                    final bottomInset = MediaQuery.viewPaddingOf(
+                      context,
+                    ).bottom;
+                    final compact =
+                        constraints.maxHeight < 760 || bottomInset > 24;
                     final horizontalPadding = constraints.maxWidth < 420
                         ? 20.0
                         : 28.0;
-                    final headerHeight = compact ? 70.0 : 88.0;
-                    final minimumCollectionHeight = controller.hasWallpapers
-                        ? (compact ? 94.0 : 116.0)
-                        : 0.0;
-                    final reserved =
-                        headerHeight +
-                        minimumCollectionHeight +
-                        (compact ? 30 : 46);
-                    final previewHeight = (constraints.maxHeight - reserved)
-                        .clamp(320.0, 680.0)
-                        .toDouble();
-                    // Give portrait thumbnails any space left after preserving the preview.
+                    final headerHeight = compact ? 66.0 : 88.0;
+                    final bottomGap = compact ? 8.0 : 18.0;
+                    final usableHeight =
+                        constraints.maxHeight - headerHeight - bottomGap;
+                    final idealCollectionHeight = compact ? 112.0 : 148.0;
+                    final minimumPreviewHeight = controller.hasWallpapers
+                        ? 280.0
+                        : 340.0;
                     final collectionHeight = controller.hasWallpapers
-                        ? (constraints.maxHeight -
-                                  headerHeight -
-                                  previewHeight -
-                                  (compact ? 10 : 18))
+                        ? idealCollectionHeight
                               .clamp(
-                                minimumCollectionHeight,
-                                compact ? 126.0 : 156.0,
+                                compact ? 88.0 : 106.0,
+                                math.max(
+                                  compact ? 88.0 : 106.0,
+                                  usableHeight - minimumPreviewHeight,
+                                ),
                               )
                               .toDouble()
                         : 0.0;
+                    // Reserve the collection first so navigation bars cannot squash it.
+                    final previewHeight = (usableHeight - collectionHeight)
+                        .clamp(controller.hasWallpapers ? 260.0 : 320.0, 680.0)
+                        .toDouble();
 
                     return Padding(
                       padding: EdgeInsets.symmetric(
@@ -170,7 +174,8 @@ class _HomeScreenState extends State<HomeScreen> {
                               onSettings: () => _showSettings(context),
                             ),
                           ),
-                          Expanded(
+                          SizedBox(
+                            height: previewHeight,
                             child: Align(
                               alignment: Alignment.topCenter,
                               child: _Preview(
@@ -202,7 +207,7 @@ class _HomeScreenState extends State<HomeScreen> {
                                 },
                               ),
                             ),
-                          SizedBox(height: compact ? 10 : 18),
+                          SizedBox(height: bottomGap),
                         ],
                       ),
                     );
@@ -583,45 +588,55 @@ class _Preview extends StatelessWidget {
             switchInCurve: Curves.easeOutCubic,
             switchOutCurve: Curves.easeInCubic,
             child: controller.hasWallpapers
-                ? Stack(
+                ? ValueListenableBuilder<int>(
                     key: const ValueKey('populated'),
-                    fit: StackFit.expand,
-                    children: [
-                      AbstractWallpaper(
-                        wallpaper: controller.selectedWallpaper!,
-                        previewBytes:
-                            controller.selectedWallpaper!.mainPreview ??
-                            controller.selectedPreview,
-                        applyCrop:
-                            controller.selectedWallpaper!.mainPreview == null,
-                        borderRadius: radius,
-                      ),
-                      Positioned(
-                        right: 14,
-                        bottom: 14,
-                        child: Row(
-                          children: [
-                            _OverlayButton(
-                              icon: Icons.photo_album_outlined,
-                              tooltip: 'Add to Albums',
-                              onTap: onAlbums,
+                    valueListenable: controller.selectedIndexListenable,
+                    builder: (context, selectedIndex, _) {
+                      if (controller.wallpapers.isEmpty) {
+                        return _EmptyPreview(onAdd: onAdd);
+                      }
+                      final boundedIndex = selectedIndex
+                          .clamp(0, controller.wallpapers.length - 1)
+                          .toInt();
+                      final wallpaper = controller.wallpapers[boundedIndex];
+                      return Stack(
+                        fit: StackFit.expand,
+                        children: [
+                          AbstractWallpaper(
+                            wallpaper: wallpaper,
+                            previewBytes:
+                                wallpaper.mainPreview ?? wallpaper.preview,
+                            applyCrop: wallpaper.mainPreview == null,
+                            borderRadius: radius,
+                          ),
+                          Positioned(
+                            right: 14,
+                            bottom: 14,
+                            child: Row(
+                              children: [
+                                _OverlayButton(
+                                  icon: Icons.photo_album_outlined,
+                                  tooltip: 'Add to Albums',
+                                  onTap: onAlbums,
+                                ),
+                                const SizedBox(width: 8),
+                                _OverlayButton(
+                                  icon: Icons.crop_rounded,
+                                  tooltip: 'Adjust Crop',
+                                  onTap: onCrop,
+                                ),
+                                const SizedBox(width: 8),
+                                _OverlayButton(
+                                  icon: Icons.shuffle_rounded,
+                                  tooltip: 'Next Wallpaper',
+                                  onTap: controller.next,
+                                ),
+                              ],
                             ),
-                            const SizedBox(width: 8),
-                            _OverlayButton(
-                              icon: Icons.crop_rounded,
-                              tooltip: 'Adjust Crop',
-                              onTap: onCrop,
-                            ),
-                            const SizedBox(width: 8),
-                            _OverlayButton(
-                              icon: Icons.shuffle_rounded,
-                              tooltip: 'Next Wallpaper',
-                              onTap: controller.next,
-                            ),
-                          ],
-                        ),
-                      ),
-                    ],
+                          ),
+                        ],
+                      );
+                    },
                   )
                 : _EmptyPreview(key: const ValueKey('empty'), onAdd: onAdd),
           ),
@@ -761,6 +776,8 @@ class _WallpaperStrip extends StatefulWidget {
 
 class _WallpaperStripState extends State<_WallpaperStrip> {
   final ScrollController scrollController = ScrollController();
+  int? optimisticSelectedIndex;
+  int selectionSerial = 0;
 
   WakeWallController get controller => widget.controller;
 
@@ -798,126 +815,167 @@ class _WallpaperStripState extends State<_WallpaperStrip> {
     }
   }
 
+  void previewSelection(int index) {
+    if (index < 0 || index >= controller.wallpapers.length) return;
+    setState(() => optimisticSelectedIndex = index);
+  }
+
+  void cancelPreviewSelection() {
+    setState(() => optimisticSelectedIndex = null);
+  }
+
+  void commitSelection(int index) {
+    final serial = ++selectionSerial;
+    previewSelection(index);
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!mounted || serial != selectionSerial) return;
+      warmPreview(index);
+      unawaited(
+        controller.select(index).whenComplete(() {
+          if (mounted && serial == selectionSerial) {
+            setState(() => optimisticSelectedIndex = null);
+          }
+        }),
+      );
+    });
+  }
+
   @override
   Widget build(BuildContext context) {
-    return Column(
-      children: [
-        Row(
+    return ValueListenableBuilder<int>(
+      valueListenable: controller.selectedIndexListenable,
+      builder: (context, selectedIndex, _) {
+        return Column(
           children: [
-            Text(
-              'Up Next',
-              style: Theme.of(
-                context,
-              ).textTheme.labelLarge?.copyWith(letterSpacing: 1.2),
+            Row(
+              children: [
+                Text(
+                  'Up Next',
+                  style: Theme.of(
+                    context,
+                  ).textTheme.labelLarge?.copyWith(letterSpacing: 1.2),
+                ),
+                const Spacer(),
+                TextButton.icon(
+                  onPressed: widget.onAdd,
+                  iconAlignment: IconAlignment.end,
+                  icon: const Icon(Icons.add_rounded, size: 19),
+                  label: const Text('ADD'),
+                  style: TextButton.styleFrom(
+                    foregroundColor: WakeWallColors.tealStrong,
+                    padding: const EdgeInsets.symmetric(horizontal: 0),
+                  ),
+                ),
+              ],
             ),
-            const Spacer(),
-            TextButton.icon(
-              onPressed: widget.onAdd,
-              iconAlignment: IconAlignment.end,
-              icon: const Icon(Icons.add_rounded, size: 19),
-              label: const Text('ADD'),
-              style: TextButton.styleFrom(
-                foregroundColor: WakeWallColors.tealStrong,
-                padding: const EdgeInsets.symmetric(horizontal: 0),
-              ),
-            ),
-          ],
-        ),
-        Expanded(
-          child: OverflowBox(
-            alignment: Alignment.center,
-            maxWidth: MediaQuery.sizeOf(context).width,
-            child: SizedBox(
-              width: MediaQuery.sizeOf(context).width,
-              child: LayoutBuilder(
-                builder: (context, constraints) {
-                  final screen = MediaQuery.sizeOf(context);
-                  final phoneRatio = (screen.width / screen.height).clamp(
-                    .44,
-                    .62,
-                  );
-                  final tileHeight = constraints.maxHeight * .84;
-                  final tileWidth = constraints.maxHeight * phoneRatio;
-
-                  return ListView.separated(
-                    key: const ValueKey('wallpaper-strip-scroll'),
-                    controller: scrollController,
-                    padding: EdgeInsets.symmetric(
-                      horizontal: widget.horizontalPadding,
-                    ),
-                    scrollDirection: Axis.horizontal,
-                    itemCount: controller.wallpapers.length,
-                    separatorBuilder: (_, _) => const SizedBox(width: 10),
-                    itemBuilder: (context, index) {
-                      final selected = index == controller.selectedIndex;
-                      final tile = _WallpaperTile(
-                        wallpaper: controller.wallpapers[index],
-                        selected: selected,
-                        width: tileWidth,
-                        height: tileHeight,
+            Expanded(
+              child: OverflowBox(
+                alignment: Alignment.center,
+                maxWidth: MediaQuery.sizeOf(context).width,
+                child: SizedBox(
+                  width: MediaQuery.sizeOf(context).width,
+                  child: LayoutBuilder(
+                    builder: (context, constraints) {
+                      final screen = MediaQuery.sizeOf(context);
+                      final phoneRatio = (screen.width / screen.height).clamp(
+                        .44,
+                        .62,
                       );
-                      return DragTarget<int>(
-                        onWillAcceptWithDetails: (details) =>
-                            details.data != index,
-                        onAcceptWithDetails: (details) {
-                          HapticFeedback.selectionClick();
-                          controller.move(details.data, index);
-                        },
-                        builder: (context, candidates, _) {
-                          final accepting = candidates.isNotEmpty;
-                          return AnimatedPadding(
-                            duration: const Duration(milliseconds: 160),
-                            padding: EdgeInsets.only(left: accepting ? 14 : 0),
-                            child: LongPressDraggable<int>(
-                              key: ValueKey('wallpaper-drag-$index'),
-                              data: index,
-                              rootOverlay: true,
-                              dragAnchorStrategy: pointerDragAnchorStrategy,
-                              onDragStarted: () {
-                                HapticFeedback.mediumImpact();
-                                widget.onDragChanged(true);
-                              },
-                              onDragUpdate: autoScroll,
-                              onDragEnd: (_) => widget.onDragChanged(false),
-                              feedback: Transform.scale(
-                                scale: 1.08,
-                                child: Material(
-                                  color: Colors.transparent,
-                                  elevation: 14,
-                                  shadowColor: Colors.black,
-                                  borderRadius: BorderRadius.circular(13),
-                                  child: tile,
+                      final tileHeight = constraints.maxHeight * .84;
+                      final tileWidth = constraints.maxHeight * phoneRatio;
+                      final activeIndex =
+                          optimisticSelectedIndex ?? selectedIndex;
+
+                      return ListView.separated(
+                        key: const ValueKey('wallpaper-strip-scroll'),
+                        controller: scrollController,
+                        padding: EdgeInsets.symmetric(
+                          horizontal: widget.horizontalPadding,
+                        ),
+                        scrollDirection: Axis.horizontal,
+                        itemCount: controller.wallpapers.length,
+                        separatorBuilder: (_, _) => const SizedBox(width: 10),
+                        itemBuilder: (context, index) {
+                          final selected = index == activeIndex;
+                          final tile = _WallpaperTile(
+                            wallpaper: controller.wallpapers[index],
+                            selected: selected,
+                            width: tileWidth,
+                            height: tileHeight,
+                          );
+                          return DragTarget<int>(
+                            onWillAcceptWithDetails: (details) =>
+                                details.data != index,
+                            onAcceptWithDetails: (details) {
+                              HapticFeedback.selectionClick();
+                              controller.move(details.data, index);
+                            },
+                            builder: (context, candidates, _) {
+                              final accepting = candidates.isNotEmpty;
+                              return AnimatedPadding(
+                                duration: const Duration(milliseconds: 160),
+                                padding: EdgeInsets.only(
+                                  left: accepting ? 14 : 0,
                                 ),
-                              ),
-                              childWhenDragging: Opacity(
-                                opacity: .18,
-                                child: tile,
-                              ),
-                              child: Semantics(
-                                button: true,
-                                selected: selected,
-                                label:
-                                    '${controller.wallpapers[index].name}, wallpaper ${index + 1} of ${controller.wallpapers.length}',
-                                hint:
-                                    'Double tap to preview. Long press to reorder or remove.',
-                                child: GestureDetector(
-                                  onTapDown: (_) => warmPreview(index),
-                                  onTap: () => controller.select(index),
-                                  child: ExcludeSemantics(child: tile),
+                                child: LongPressDraggable<int>(
+                                  key: ValueKey('wallpaper-drag-$index'),
+                                  data: index,
+                                  rootOverlay: true,
+                                  dragAnchorStrategy: pointerDragAnchorStrategy,
+                                  onDragStarted: () {
+                                    HapticFeedback.mediumImpact();
+                                    cancelPreviewSelection();
+                                    widget.onDragChanged(true);
+                                  },
+                                  onDragUpdate: autoScroll,
+                                  onDragEnd: (_) => widget.onDragChanged(false),
+                                  feedback: Transform.scale(
+                                    scale: 1.08,
+                                    child: Material(
+                                      color: Colors.transparent,
+                                      elevation: 14,
+                                      shadowColor: Colors.black,
+                                      borderRadius: BorderRadius.circular(13),
+                                      child: tile,
+                                    ),
+                                  ),
+                                  childWhenDragging: Opacity(
+                                    opacity: .18,
+                                    child: tile,
+                                  ),
+                                  child: Semantics(
+                                    button: true,
+                                    selected: selected,
+                                    label:
+                                        '${controller.wallpapers[index].name}, wallpaper ${index + 1} of ${controller.wallpapers.length}',
+                                    hint:
+                                        'Double tap to preview. Long press to reorder or remove.',
+                                    child: Listener(
+                                      onPointerDown: (_) =>
+                                          previewSelection(index),
+                                      onPointerCancel: (_) =>
+                                          cancelPreviewSelection(),
+                                      child: GestureDetector(
+                                        onTapCancel: cancelPreviewSelection,
+                                        onTap: () => commitSelection(index),
+                                        child: ExcludeSemantics(child: tile),
+                                      ),
+                                    ),
+                                  ),
                                 ),
-                              ),
-                            ),
+                              );
+                            },
                           );
                         },
                       );
                     },
-                  );
-                },
+                  ),
+                ),
               ),
             ),
-          ),
-        ),
-      ],
+          ],
+        );
+      },
     );
   }
 }
@@ -939,7 +997,7 @@ class _WallpaperTile extends StatelessWidget {
   Widget build(BuildContext context) {
     return AnimatedContainer(
       key: ValueKey('wallpaper-thumbnail-${wallpaper.id}'),
-      duration: const Duration(milliseconds: 70),
+      duration: selected ? Duration.zero : const Duration(milliseconds: 70),
       width: width,
       height: height,
       padding: const EdgeInsets.all(2.5),
@@ -964,6 +1022,7 @@ class _WallpaperTile extends StatelessWidget {
 
 class _AlbumsSheet extends StatefulWidget {
   const _AlbumsSheet({required this.controller});
+
   final WakeWallController controller;
 
   @override
@@ -971,74 +1030,108 @@ class _AlbumsSheet extends StatefulWidget {
 }
 
 class _AlbumsSheetState extends State<_AlbumsSheet> {
+  Set<String>? optimisticActiveAlbumIds;
+  Timer? albumApplyTimer;
+  Set<String>? pendingActiveAlbumIds;
+
   WakeWallController get controller => widget.controller;
+  Set<String> get visibleActiveAlbumIds =>
+      optimisticActiveAlbumIds ?? controller.activeAlbumIds;
+
+  @override
+  void dispose() {
+    albumApplyTimer?.cancel();
+    final pending = pendingActiveAlbumIds;
+    if (pending != null &&
+        !_sameStringSet(controller.activeAlbumIds, pending)) {
+      Timer(const Duration(milliseconds: 220), () {
+        unawaited(controller.setActiveAlbums(pending));
+      });
+    }
+    super.dispose();
+  }
 
   @override
   Widget build(BuildContext context) {
-    return ListenableBuilder(
-      listenable: controller,
-      builder: (context, _) => SingleChildScrollView(
-        padding: const EdgeInsets.fromLTRB(20, 6, 20, 24),
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          crossAxisAlignment: CrossAxisAlignment.stretch,
-          children: [
-            Row(
-              children: [
-                Text('Albums', style: Theme.of(context).textTheme.titleLarge),
-                const Spacer(),
-                IconButton(
-                  onPressed: _createAlbum,
-                  tooltip: 'Create Album',
-                  icon: const Icon(Icons.add_rounded),
-                ),
-                IconButton(
-                  onPressed: () => Navigator.pop(context),
-                  tooltip: 'Close Albums',
-                  icon: const Icon(Icons.close_rounded),
-                ),
-              ],
-            ),
-            const SizedBox(height: 10),
-            _AlbumFilterTile(
-              title: 'All Wallpapers',
-              icon: Icons.photo_library_outlined,
-              selected: controller.activeAlbumIds.isEmpty,
-              onTap: () => controller.setActiveAlbums({}),
-            ),
-            for (final album in controller.albums)
-              _AlbumFilterTile(
-                title: album.name,
-                icon: Icons.photo_album_outlined,
-                selected: controller.activeAlbumIds.contains(album.id),
-                onTap: () => _toggle(album.id),
-                onLongPress: () => _manageAlbum(album),
+    return SingleChildScrollView(
+      padding: _bottomSheetPadding(context, left: 20, top: 6, right: 20),
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          Row(
+            children: [
+              Text('Albums', style: Theme.of(context).textTheme.titleLarge),
+              const Spacer(),
+              IconButton(
+                onPressed: _createAlbum,
+                tooltip: 'Create Album',
+                icon: const Icon(Icons.add_rounded),
               ),
-            if (controller.albums.isEmpty) ...[
-              const SizedBox(height: 16),
-              Text(
-                'Create an album to group wallpapers without making extra copies.',
-                textAlign: TextAlign.center,
-                style: Theme.of(
-                  context,
-                ).textTheme.bodyMedium?.copyWith(color: WakeWallColors.muted),
+              IconButton(
+                onPressed: () => Navigator.pop(context),
+                tooltip: 'Close Albums',
+                icon: const Icon(Icons.close_rounded),
               ),
             ],
+          ),
+          const SizedBox(height: 10),
+          _AlbumFilterTile(
+            title: 'All Wallpapers',
+            icon: Icons.photo_library_outlined,
+            selected: visibleActiveAlbumIds.isEmpty,
+            onTap: () => _setActiveAlbums({}),
+          ),
+          for (final album in controller.albums)
+            _AlbumFilterTile(
+              title: album.name,
+              icon: Icons.photo_album_outlined,
+              selected: visibleActiveAlbumIds.contains(album.id),
+              onTap: () => _toggle(album.id),
+              onLongPress: () => _manageAlbum(album),
+            ),
+          if (controller.albums.isEmpty) ...[
+            const SizedBox(height: 16),
+            Text(
+              'Create an album to group wallpapers without making extra copies.',
+              textAlign: TextAlign.center,
+              style: Theme.of(
+                context,
+              ).textTheme.bodyMedium?.copyWith(color: WakeWallColors.muted),
+            ),
           ],
-        ),
+        ],
       ),
     );
   }
 
-  Future<void> _toggle(String id) async {
-    final updated = {...controller.activeAlbumIds};
+  void _toggle(String id) {
+    final updated = {...visibleActiveAlbumIds};
     updated.contains(id) ? updated.remove(id) : updated.add(id);
-    await controller.setActiveAlbums(updated);
+    _setActiveAlbums(updated);
+  }
+
+  void _setActiveAlbums(Set<String> ids) {
+    setState(() => optimisticActiveAlbumIds = {...ids});
+    pendingActiveAlbumIds = {...ids};
+    albumApplyTimer?.cancel();
+    albumApplyTimer = Timer(const Duration(milliseconds: 220), () {
+      final pending = pendingActiveAlbumIds;
+      pendingActiveAlbumIds = null;
+      if (pending == null ||
+          _sameStringSet(controller.activeAlbumIds, pending)) {
+        return;
+      }
+      unawaited(controller.setActiveAlbums(pending));
+    });
   }
 
   Future<void> _createAlbum() async {
     final name = await _albumNameDialog(context, title: 'New Album');
-    if (name != null) await controller.createAlbum(name);
+    if (name != null) {
+      await controller.createAlbum(name);
+      if (mounted) setState(() {});
+    }
   }
 
   Future<void> _manageAlbum(WallpaperAlbum album) async {
@@ -1069,6 +1162,7 @@ class _AlbumsSheetState extends State<_AlbumsSheet> {
         initialValue: album.name,
       );
       if (name != null) await controller.renameAlbum(album.id, name);
+      if (mounted) setState(() {});
     } else if (action == 'delete') {
       final deletePhotos = await showDialog<bool>(
         context: context,
@@ -1095,6 +1189,7 @@ class _AlbumsSheetState extends State<_AlbumsSheet> {
           album.id,
           deleteExclusiveWallpapers: deletePhotos,
         );
+        if (mounted) setState(() {});
       }
     }
   }
@@ -1123,7 +1218,7 @@ class _AssignAlbumsSheetState extends State<_AssignAlbumsSheet> {
   @override
   Widget build(BuildContext context) {
     return SingleChildScrollView(
-      padding: const EdgeInsets.fromLTRB(20, 6, 20, 24),
+      padding: _bottomSheetPadding(context, left: 20, top: 6, right: 20),
       child: Column(
         mainAxisSize: MainAxisSize.min,
         crossAxisAlignment: CrossAxisAlignment.stretch,
@@ -1226,18 +1321,73 @@ class _AlbumFilterTile extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return ListTile(
-      contentPadding: const EdgeInsets.symmetric(horizontal: 4),
-      leading: Icon(icon),
-      title: Text(title),
-      trailing: Icon(
-        selected ? Icons.check_circle_rounded : Icons.circle_outlined,
-        color: selected ? WakeWallColors.tealStrong : WakeWallColors.muted,
+    return Semantics(
+      button: true,
+      selected: selected,
+      child: Material(
+        color: Colors.transparent,
+        child: InkWell(
+          onTap: onTap,
+          onLongPress: onLongPress,
+          splashFactory: NoSplash.splashFactory,
+          overlayColor: const WidgetStatePropertyAll(Colors.transparent),
+          borderRadius: BorderRadius.circular(12),
+          child: Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 14),
+            child: Row(
+              children: [
+                Icon(icon),
+                const SizedBox(width: 22),
+                Expanded(
+                  child: Text(
+                    title,
+                    style: Theme.of(context).textTheme.titleMedium,
+                  ),
+                ),
+                AnimatedSwitcher(
+                  duration: const Duration(milliseconds: 90),
+                  switchInCurve: Curves.easeOut,
+                  switchOutCurve: Curves.easeIn,
+                  child: Icon(
+                    selected
+                        ? Icons.check_circle_rounded
+                        : Icons.circle_outlined,
+                    key: ValueKey(selected),
+                    color: selected
+                        ? WakeWallColors.tealStrong
+                        : WakeWallColors.muted,
+                  ),
+                ),
+              ],
+            ),
+          ),
+        ),
       ),
-      onTap: onTap,
-      onLongPress: onLongPress,
     );
   }
+}
+
+EdgeInsets _bottomSheetPadding(
+  BuildContext context, {
+  required double left,
+  required double top,
+  required double right,
+}) {
+  // Keeps sheet content above gesture and 3-button navigation areas.
+  return EdgeInsets.fromLTRB(
+    left,
+    top,
+    right,
+    24 + MediaQuery.viewPaddingOf(context).bottom,
+  );
+}
+
+bool _sameStringSet(Set<String> left, Set<String> right) {
+  if (left.length != right.length) return false;
+  for (final value in left) {
+    if (!right.contains(value)) return false;
+  }
+  return true;
 }
 
 Future<String?> _albumNameDialog(
@@ -1299,7 +1449,12 @@ class _SettingsSheetState extends State<_SettingsSheet> {
         return Stack(
           children: [
             SingleChildScrollView(
-              padding: const EdgeInsets.fromLTRB(22, 4, 22, 24),
+              padding: _bottomSheetPadding(
+                context,
+                left: 22,
+                top: 4,
+                right: 22,
+              ),
               child: Column(
                 mainAxisSize: MainAxisSize.min,
                 crossAxisAlignment: CrossAxisAlignment.stretch,

@@ -1,3 +1,5 @@
+import 'dart:math' as math;
+
 import 'package:flutter/foundation.dart';
 import 'package:flutter/services.dart';
 import 'package:image/image.dart' as image;
@@ -12,6 +14,7 @@ class WakeWallController extends ChangeNotifier {
   final NativeWallpaperBridge _bridge;
   final List<Wallpaper> _wallpapers = [];
   final List<WallpaperAlbum> _albums = [];
+  final ValueNotifier<int> _selectedIndexNotifier = ValueNotifier<int>(0);
   Set<String> _activeAlbumIds = {};
   bool _askAlbumsAfterImport = true;
   Set<String> _defaultImportAlbumIds = {};
@@ -33,6 +36,7 @@ class WakeWallController extends ChangeNotifier {
   Set<String> get defaultImportAlbumIds =>
       Set.unmodifiable(_defaultImportAlbumIds);
   int get selectedIndex => _selectedIndex;
+  ValueListenable<int> get selectedIndexListenable => _selectedIndexNotifier;
   bool get hasWallpapers => _wallpapers.isNotEmpty;
   bool get paused => _paused;
   RotationOrder get order => _order;
@@ -78,13 +82,11 @@ class WakeWallController extends ChangeNotifier {
 
   Future<void> select(int index) async {
     if (index < 0 || index >= _wallpapers.length) return;
-    _selectedIndex = index;
-    notifyListeners();
+    _setSelectedIndex(index);
     await _runNative(() async {
       final selected = await _bridge.setCurrent(index);
       if (selected != null && selected >= 0 && selected < _wallpapers.length) {
-        _selectedIndex = selected;
-        notifyListeners();
+        _setSelectedIndex(selected);
       }
     });
   }
@@ -126,13 +128,11 @@ class WakeWallController extends ChangeNotifier {
 
   Future<void> next() async {
     if (_wallpapers.isEmpty) return;
-    _selectedIndex = (_selectedIndex + 1) % _wallpapers.length;
-    notifyListeners();
+    _setSelectedIndex((_selectedIndex + 1) % _wallpapers.length);
     await _runNative(() async {
       final next = await _bridge.showNext();
       if (next != null) {
-        _selectedIndex = next % _wallpapers.length;
-        notifyListeners();
+        _setSelectedIndex(next % _wallpapers.length);
       }
     });
   }
@@ -308,9 +308,14 @@ class WakeWallController extends ChangeNotifier {
     }
     final selectedId = selectedWallpaper?.id;
     _wallpapers.insert(newIndex, _wallpapers.removeAt(oldIndex));
-    _selectedIndex = selectedId == null
-        ? 0
-        : _wallpapers.indexWhere((wallpaper) => wallpaper.id == selectedId);
+    _setSelectedIndex(
+      selectedId == null
+          ? 0
+          : math.max(
+              0,
+              _wallpapers.indexWhere((wallpaper) => wallpaper.id == selectedId),
+            ),
+    );
     notifyListeners();
     await _runNative(() => _bridge.moveWallpaper(oldIndex, newIndex));
   }
@@ -454,7 +459,17 @@ class WakeWallController extends ChangeNotifier {
     }
     final savedIndex =
         (configuration['index'] as num?)?.toInt() ?? _selectedIndex;
-    _selectedIndex = _wallpapers.isEmpty ? 0 : savedIndex % _wallpapers.length;
+    _setSelectedIndex(
+      _wallpapers.isEmpty ? 0 : savedIndex % _wallpapers.length,
+    );
+  }
+
+  void _setSelectedIndex(int index) {
+    final normalized = _wallpapers.isEmpty ? 0 : index % _wallpapers.length;
+    _selectedIndex = normalized;
+    if (_selectedIndexNotifier.value != normalized) {
+      _selectedIndexNotifier.value = normalized;
+    }
   }
 
   // Adds only the newly imported previews instead of rebuilding the full library.
@@ -537,6 +552,12 @@ class WakeWallController extends ChangeNotifier {
       _lastNativeError = 'The selected photo could not be imported.';
       notifyListeners();
     }
+  }
+
+  @override
+  void dispose() {
+    _selectedIndexNotifier.dispose();
+    super.dispose();
   }
 }
 

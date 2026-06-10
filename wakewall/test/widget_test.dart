@@ -435,7 +435,7 @@ void main() {
     await tester.pumpAndSettle();
 
     expect(find.byTooltip('Reset wallpaper'), findsOneWidget);
-    await tester.tap(find.text('Cancel'));
+    await tester.tap(find.byKey(const ValueKey('crop-editor-cancel')));
     await tester.pumpAndSettle();
     expect(find.text('Adjust Wallpaper'), findsNothing);
     expect(find.byTooltip('Adjust Crop'), findsOneWidget);

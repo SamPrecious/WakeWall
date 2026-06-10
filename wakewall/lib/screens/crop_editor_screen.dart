@@ -36,6 +36,11 @@ class _CropEditorScreenState extends State<CropEditorScreen> {
   Wallpaper get wallpaper =>
       widget.controller.wallpapers[widget.wallpaperIndex];
 
+  bool get canReset =>
+      !crop.isDefault ||
+      displayMode != WallpaperDisplayMode.fill ||
+      fitBackgroundColor != const Color(0xFF202124);
+
   @override
   void initState() {
     super.initState();
@@ -52,16 +57,7 @@ class _CropEditorScreenState extends State<CropEditorScreen> {
           children: [
             _EditorHeader(
               saving: saving,
-              canReset:
-                  !crop.isDefault ||
-                  displayMode != WallpaperDisplayMode.fill ||
-                  fitBackgroundColor != const Color(0xFF202124),
               onCancel: () => context.router.pop(),
-              onReset: () => setState(() {
-                crop = const WallpaperCrop();
-                displayMode = WallpaperDisplayMode.fill;
-                fitBackgroundColor = const Color(0xFF202124);
-              }),
               onSave: _save,
             ),
             Expanded(
@@ -157,6 +153,32 @@ class _CropEditorScreenState extends State<CropEditorScreen> {
                                   ),
                                 ),
                               ),
+                              Positioned(
+                                top: 14,
+                                right: 14,
+                                child: AnimatedSwitcher(
+                                  duration: const Duration(milliseconds: 240),
+                                  reverseDuration: const Duration(
+                                    milliseconds: 180,
+                                  ),
+                                  switchInCurve: Curves.easeOut,
+                                  switchOutCurve: Curves.easeIn,
+                                  child: canReset
+                                      ? _CropOverlayButton(
+                                          key: const ValueKey(
+                                            'crop-reset-visible',
+                                          ),
+                                          icon: Icons.restart_alt_rounded,
+                                          tooltip: 'Reset wallpaper',
+                                          onTap: _reset,
+                                        )
+                                      : const SizedBox(
+                                          key: ValueKey('crop-reset-hidden'),
+                                          width: 48,
+                                          height: 48,
+                                        ),
+                                ),
+                              ),
                             ],
                           ),
                         ),
@@ -192,51 +214,79 @@ class _CropEditorScreenState extends State<CropEditorScreen> {
     if (!mounted) return;
     context.router.pop();
   }
+
+  void _reset() {
+    setState(() {
+      crop = const WallpaperCrop();
+      displayMode = WallpaperDisplayMode.fill;
+      fitBackgroundColor = const Color(0xFF202124);
+    });
+  }
 }
 
 class _EditorHeader extends StatelessWidget {
   const _EditorHeader({
     required this.saving,
-    required this.canReset,
     required this.onCancel,
-    required this.onReset,
     required this.onSave,
   });
 
   final bool saving;
-  final bool canReset;
   final VoidCallback onCancel;
-  final VoidCallback onReset;
   final VoidCallback onSave;
 
   @override
   Widget build(BuildContext context) {
+    final compactButtonStyle = TextButton.styleFrom(
+      minimumSize: const Size(0, 40),
+      padding: const EdgeInsets.symmetric(horizontal: 8),
+      tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+      visualDensity: VisualDensity.compact,
+    );
+
     return Padding(
       padding: const EdgeInsets.fromLTRB(10, 10, 10, 8),
-      child: Row(
-        children: [
-          TextButton(onPressed: onCancel, child: const Text('Cancel')),
-          Expanded(
-            child: Text(
-              'Adjust Wallpaper',
-              textAlign: TextAlign.center,
-              style: Theme.of(context).textTheme.headlineSmall,
-            ),
-          ),
-          if (canReset)
-            Tooltip(
-              message: 'Reset wallpaper',
-              child: TextButton.icon(
-                onPressed: onReset,
-                icon: const Icon(Icons.restart_alt_rounded, size: 18),
-                label: const Text('Reset'),
+      child: SizedBox(
+        height: 48,
+        child: Stack(
+          alignment: Alignment.center,
+          children: [
+            Padding(
+              padding: const EdgeInsets.symmetric(horizontal: 84),
+              child: FittedBox(
+                fit: BoxFit.scaleDown,
+                child: Text(
+                  'Adjust Wallpaper',
+                  maxLines: 1,
+                  softWrap: false,
+                  textAlign: TextAlign.center,
+                  style: Theme.of(context).textTheme.headlineSmall?.copyWith(
+                    fontWeight: FontWeight.w500,
+                    letterSpacing: -.2,
+                  ),
+                ),
               ),
             ),
-          TextButton(
-            onPressed: saving ? null : onSave,
-            child: Text(saving ? 'Saving' : 'Save'),
-          ),
-        ],
+            Align(
+              alignment: Alignment.centerLeft,
+              child: TextButton(
+                key: const ValueKey('crop-editor-cancel'),
+                style: compactButtonStyle,
+                onPressed: onCancel,
+                child: const Text('Cancel'),
+              ),
+            ),
+            Align(
+              alignment: Alignment.centerRight,
+              child: TextButton(
+                key: const ValueKey('crop-editor-save'),
+                style: compactButtonStyle,
+                onPressed: saving ? null : onSave,
+                child: Text(saving ? 'Saving' : 'Save'),
+              ),
+            ),
+          ],
+        ),
       ),
     );
   }
@@ -273,14 +323,14 @@ class _EditorFooter extends StatelessWidget {
                   icon: Icon(Icons.crop_free_rounded),
                 ),
                 ButtonSegment(
-                  value: WallpaperDisplayMode.fit,
-                  label: Text('Fit'),
-                  icon: Icon(Icons.fit_screen_rounded),
-                ),
-                ButtonSegment(
                   value: WallpaperDisplayMode.blur,
                   label: Text('Blur'),
                   icon: Icon(Icons.blur_on_rounded),
+                ),
+                ButtonSegment(
+                  value: WallpaperDisplayMode.fit,
+                  label: Text('Fit'),
+                  icon: Icon(Icons.fit_screen_rounded),
                 ),
               ],
               selected: {displayMode},
@@ -318,6 +368,40 @@ class _EditorFooter extends StatelessWidget {
                   ),
           ),
         ],
+      ),
+    );
+  }
+}
+
+class _CropOverlayButton extends StatelessWidget {
+  const _CropOverlayButton({
+    required this.icon,
+    required this.tooltip,
+    required this.onTap,
+    super.key,
+  });
+
+  final IconData icon;
+  final String tooltip;
+  final VoidCallback onTap;
+
+  @override
+  Widget build(BuildContext context) {
+    return Tooltip(
+      message: tooltip,
+      child: Material(
+        color: const Color(0xCC25262A),
+        borderRadius: BorderRadius.circular(11),
+        child: InkWell(
+          key: const ValueKey('crop-editor-reset'),
+          onTap: onTap,
+          borderRadius: BorderRadius.circular(11),
+          child: SizedBox(
+            width: 48,
+            height: 48,
+            child: Icon(icon, color: const Color(0xFFE3E3E8), size: 21),
+          ),
+        ),
       ),
     );
   }

@@ -261,7 +261,23 @@ placed directly beside the feature it controls.
 - The large wallpaper preview should retain a realistic phone-like proportion.
 - `Up Next` thumbnails are portrait, compact, rounded, and may visually fall off
   either edge while scrolling.
+- The home layout should reserve `Up Next` space before sizing the main preview
+  so 3-button navigation, gesture navigation, and display scaling behave alike.
+- Bottom-sheet content must reserve the Android bottom safe area so rows and
+  buttons never dip under gesture or 3-button navigation.
 - Avoid shifting major layout elements when contextual controls appear.
+- Interactive controls should acknowledge taps immediately. Selection borders,
+  checkmarks, and lightweight visual state may update optimistically before
+  native sync or heavier preview work completes.
+- Selected-wallpaper changes should use the lightweight selected-index listener
+  rather than forcing a full home-screen rebuild.
+- Album filter taps keep sheet feedback local and debounce native filter sync so
+  the checkmark animation is not competing with wallpaper-list refresh work.
+- Crop-editor header actions should keep stable positions.
+- The crop-editor title is `Adjust Wallpaper`; it stays centred in the header
+  and scales down on narrow screens rather than wrapping, overlapping, or
+  moving the corner actions. Reset appears as a preview overlay action only when
+  there is something to reset.
 
 ### Copy Style
 
