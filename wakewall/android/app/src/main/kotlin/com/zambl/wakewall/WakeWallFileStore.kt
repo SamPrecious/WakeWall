@@ -14,8 +14,6 @@ class WakeWallFileStore(
     private val clearPendingImports: () -> Unit,
     private val storageKey: (String) -> String,
     private val deleteMetadata: (String) -> Unit,
-    private val scrollingEnabled: () -> Boolean,
-    private val scrollingRenderSuffix: String,
 ) {
     private val appContext = context.applicationContext
 
@@ -79,13 +77,6 @@ class WakeWallFileStore(
         appContext.cacheDir.listFiles()
             ?.filter { it.isDirectory && it.name.startsWith("restore_") }
             ?.forEach(File::deleteRecursively)
-        if (!scrollingEnabled()) {
-            val directory = previewDirectory()
-            activeWallpapers().forEach { value ->
-                File(directory, "${storageKey(value)}_$scrollingRenderSuffix.jpg").delete()
-                File(directory, "${value.hashCode()}_$scrollingRenderSuffix.jpg").delete()
-            }
-        }
         return (before - managedStorageBytes()).coerceAtLeast(0)
     }
 
@@ -122,6 +113,8 @@ class WakeWallFileStore(
             "main_crop_v2",
             "wallpaper_crop_v1",
             "wallpaper_scroll_v1",
+            "wallpaper_scroll_v2",
+            "wallpaper_scroll_v3",
         )
     }
 }

@@ -3,6 +3,9 @@
 WakeWall is an Android live wallpaper app that prepares the next selected photo
 when the screen turns off, so it is ready for the next wake.
 
+See [PROJECT_SPEC.md](PROJECT_SPEC.md) for the living product specification,
+architecture, design rules, and development constraints.
+
 ## Features
 
 - Multi-photo import through Android Photos or file providers
@@ -46,9 +49,9 @@ cd android
 ## Personal Release APK
 
 ```powershell
-flutter build apk --release --split-per-abi
+flutter build apk --release
 ```
 
-Install `build/app/outputs/flutter-apk/app-arm64-v8a-release.apk` through Samsung
-My Files. Release builds currently use the Android debug signing key; configure
-a permanent signing key before public distribution.
+Install `build/app/outputs/flutter-apk/app-release.apk` through Samsung My
+Files. Release builds currently use the Android debug signing key; configure a
+permanent signing key before public distribution.

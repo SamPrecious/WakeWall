@@ -385,7 +385,7 @@ class WakeWallService : WallpaperService() {
                 canvas = lockSurfaceCanvas(useHardware = bitmap != null)
                 if (canvas != null) {
                     if (bitmap != null) {
-                        drawCachedFrame(canvas, bitmap)
+                        drawCachedFrame(canvas, bitmap, index)
                     } else {
                         drawWallpaper(canvas, index)
                     }
@@ -402,12 +402,19 @@ class WakeWallService : WallpaperService() {
         }
 
         // Copies the visible launcher viewport from a prepared wide frame.
-        private fun drawCachedFrame(canvas: Canvas, bitmap: Bitmap) {
+        private fun drawCachedFrame(canvas: Canvas, bitmap: Bitmap, index: Int) {
             if (!scrollingEnabled || bitmap.width <= canvas.width) {
                 canvas.drawBitmap(bitmap, 0f, 0f, null)
                 return
             }
-            val left = ((bitmap.width - canvas.width) * wallpaperXOffset)
+            val displayMode = store.displayMode(index)
+            // Keeps bordered compositions centred instead of exposing uneven edges.
+            val visibleOffset = if (displayMode == "fill") {
+                wallpaperXOffset
+            } else {
+                .5f
+            }
+            val left = ((bitmap.width - canvas.width) * visibleOffset)
                 .toInt()
                 .coerceIn(0, bitmap.width - canvas.width)
             canvas.drawBitmap(

@@ -48,8 +48,6 @@ class WakeWallStore(context: Context) {
             clearPendingImports = transactionStore::clearImports,
             storageKey = ::storageKey,
             deleteMetadata = ::deleteMetadata,
-            scrollingEnabled = { wallpaperScrolling },
-            scrollingRenderSuffix = SCROLLING_RENDER_SUFFIX,
         )
     }
 
@@ -964,7 +962,7 @@ class WakeWallStore(context: Context) {
         } else {
             screenWidth
         }
-        return ensureCroppedPreviewFile(
+        val file = ensureCroppedPreviewFile(
             value,
             targetWidth,
             100,
@@ -974,7 +972,16 @@ class WakeWallStore(context: Context) {
             } else {
                 null
             },
+            scrollingViewportWidth = screenWidth.takeIf { scrolling },
         )
+        if (scrolling && file != null) {
+            val directory = file.parentFile
+            LEGACY_SCROLLING_RENDER_SUFFIXES.forEach { suffix ->
+                File(directory, "${storageKey(value)}_$suffix.jpg").delete()
+                File(directory, "${value.hashCode()}_$suffix.jpg").delete()
+            }
+        }
+        return file
     }
 
     fun wallpaperRenderFile(index: Int, scrolling: Boolean): File? {
@@ -999,6 +1006,7 @@ class WakeWallStore(context: Context) {
         quality: Int,
         suffix: String,
         targetHeight: Int? = null,
+        scrollingViewportWidth: Int? = null,
     ): File? {
         val directory = File(appContext.cacheDir, "wallpaper_previews").apply { mkdirs() }
         val file = File(directory, "${storageKey(value)}_$suffix.jpg")
@@ -1025,21 +1033,29 @@ class WakeWallStore(context: Context) {
 
         val width = targetWidth.toFloat()
         val height = outputHeight.toFloat()
+        val foregroundViewportWidth = scrollingViewportWidth
+            ?.takeIf { displayMode != DISPLAY_MODE_FILL }
+            ?.toFloat()
+            ?: width
         val scale = if (displayMode == DISPLAY_MODE_FILL) {
             max(width / source.width, height / source.height)
         } else {
-            min(width / source.width, height / source.height)
+            min(foregroundViewportWidth / source.width, height / source.height)
         }
         val drawnWidth = source.width * scale
         val drawnHeight = source.height * scale
         if (displayMode == DISPLAY_MODE_BLUR) {
             WakeWallBlurRenderer.draw(canvas, source, width, height)
         }
-        val maxOffsetX = max(0f, (drawnWidth * crop.scale - width) / (2f * width))
+        val maxOffsetX = max(
+            0f,
+            (drawnWidth * crop.scale - foregroundViewportWidth) / (2f * foregroundViewportWidth),
+        )
         val maxOffsetY = max(0f, (drawnHeight * crop.scale - height) / (2f * height))
         canvas.save()
         canvas.translate(
-            width / 2f + crop.offsetX.coerceIn(-maxOffsetX, maxOffsetX) * width,
+            width / 2f +
+                crop.offsetX.coerceIn(-maxOffsetX, maxOffsetX) * foregroundViewportWidth,
             height / 2f + crop.offsetY.coerceIn(-maxOffsetY, maxOffsetY) * height,
         )
         canvas.scale(crop.scale, crop.scale)
@@ -1554,7 +1570,9 @@ class WakeWallStore(context: Context) {
         private const val MAIN_PREVIEW_WIDTH = 720
         private const val SOURCE_PREVIEW_EDGE = 1920f
         private const val WALLPAPER_RENDER_SUFFIX = "wallpaper_crop_v1"
-        private const val SCROLLING_RENDER_SUFFIX = "wallpaper_scroll_v1"
+        private val LEGACY_SCROLLING_RENDER_SUFFIXES =
+            setOf("wallpaper_scroll_v1", "wallpaper_scroll_v2")
+        private const val SCROLLING_RENDER_SUFFIX = "wallpaper_scroll_v3"
         const val SCROLLING_WIDTH_MULTIPLIER = 1.5f
         private const val SAMPLE_PREFIX = "sample:"
         private const val LOCAL_PREFIX = "local:"
