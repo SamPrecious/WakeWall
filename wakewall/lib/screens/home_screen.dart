@@ -135,7 +135,7 @@ class _HomeScreenState extends State<HomeScreen> {
                     final horizontalPadding = constraints.maxWidth < 420
                         ? 20.0
                         : 28.0;
-                    final headerHeight = controller.paused ? 94.0 : 88.0;
+                    final headerHeight = 88.0;
                     final bottomGap = bottomInset > 24 ? 10.0 : 18.0;
                     final usableHeight =
                         constraints.maxHeight - headerHeight - bottomGap;
@@ -173,6 +173,9 @@ class _HomeScreenState extends State<HomeScreen> {
                             child: _Header(
                               paused: controller.paused,
                               onAlbums: () => _showAlbums(context),
+                              onTogglePaused: () => unawaited(
+                                controller.setPaused(!controller.paused),
+                              ),
                               onSettings: () => _showSettings(context),
                             ),
                           ),
@@ -485,11 +488,13 @@ class _Header extends StatelessWidget {
   const _Header({
     required this.paused,
     required this.onAlbums,
+    required this.onTogglePaused,
     required this.onSettings,
   });
 
   final bool paused;
   final VoidCallback onAlbums;
+  final VoidCallback onTogglePaused;
   final VoidCallback onSettings;
 
   @override
@@ -514,26 +519,82 @@ class _Header extends StatelessWidget {
         ),
         Positioned(
           right: 0,
-          child: IconButton(
-            onPressed: onSettings,
-            tooltip: 'Settings',
-            icon: const Icon(Icons.settings_outlined),
+          child: Row(
+            children: [
+              _HeaderActionButton(
+                icon: paused ? Icons.pause_rounded : Icons.pause_outlined,
+                tooltip: paused ? 'Resume WakeWall' : 'Pause WakeWall',
+                selected: paused,
+                onTap: onTogglePaused,
+              ),
+              const SizedBox(width: 4),
+              _HeaderActionButton(
+                icon: Icons.settings_outlined,
+                tooltip: 'Settings',
+                onTap: onSettings,
+              ),
+            ],
           ),
         ),
         Positioned(
           left: 0,
-          child: IconButton(
-            onPressed: onAlbums,
+          child: _HeaderActionButton(
+            icon: Icons.photo_library_outlined,
             tooltip: 'Albums',
-            icon: const Icon(Icons.photo_library_outlined),
+            onTap: onAlbums,
           ),
         ),
-        if (paused)
-          const Positioned(
-            bottom: 0,
-            child: _StatusPill(label: 'Paused', icon: Icons.pause_rounded),
-          ),
       ],
+    );
+  }
+}
+
+class _HeaderActionButton extends StatelessWidget {
+  const _HeaderActionButton({
+    required this.icon,
+    required this.tooltip,
+    required this.onTap,
+    this.selected = false,
+  });
+
+  final IconData icon;
+  final String tooltip;
+  final VoidCallback onTap;
+  final bool selected;
+
+  @override
+  Widget build(BuildContext context) {
+    return Tooltip(
+      message: tooltip,
+      child: Material(
+        color: selected
+            ? WakeWallColors.tealStrong.withValues(alpha: .16)
+            : Colors.transparent,
+        borderRadius: BorderRadius.circular(13),
+        child: InkWell(
+          onTap: onTap,
+          borderRadius: BorderRadius.circular(13),
+          child: AnimatedContainer(
+            duration: const Duration(milliseconds: 160),
+            curve: Curves.easeOut,
+            width: 40,
+            height: 40,
+            decoration: BoxDecoration(
+              borderRadius: BorderRadius.circular(13),
+              border: Border.all(
+                color: selected
+                    ? WakeWallColors.tealStrong.withValues(alpha: .55)
+                    : Colors.transparent,
+              ),
+            ),
+            child: Icon(
+              icon,
+              color: selected ? WakeWallColors.tealStrong : WakeWallColors.teal,
+              size: selected ? 21 : 22,
+            ),
+          ),
+        ),
+      ),
     );
   }
 }
@@ -622,28 +683,32 @@ class _Preview extends StatelessWidget {
                             ),
                           ),
                           Positioned(
-                            right: 14,
+                            left: 0,
+                            right: 0,
                             bottom: 14,
-                            child: Row(
-                              children: [
-                                _OverlayButton(
-                                  icon: Icons.photo_album_outlined,
-                                  tooltip: 'Add to Albums',
-                                  onTap: onAlbums,
-                                ),
-                                const SizedBox(width: 8),
-                                _OverlayButton(
-                                  icon: Icons.crop_rounded,
-                                  tooltip: 'Adjust Crop',
-                                  onTap: onCrop,
-                                ),
-                                const SizedBox(width: 8),
-                                _OverlayButton(
-                                  icon: Icons.shuffle_rounded,
-                                  tooltip: 'Next Wallpaper',
-                                  onTap: controller.next,
-                                ),
-                              ],
+                            child: Center(
+                              child: Row(
+                                mainAxisSize: MainAxisSize.min,
+                                children: [
+                                  _OverlayButton(
+                                    icon: Icons.photo_album_outlined,
+                                    tooltip: 'Add to Albums',
+                                    onTap: onAlbums,
+                                  ),
+                                  const SizedBox(width: 8),
+                                  _OverlayButton(
+                                    icon: Icons.crop_rounded,
+                                    tooltip: 'Adjust Crop',
+                                    onTap: onCrop,
+                                  ),
+                                  const SizedBox(width: 8),
+                                  _OverlayButton(
+                                    icon: Icons.shuffle_rounded,
+                                    tooltip: 'Next Wallpaper',
+                                    onTap: controller.next,
+                                  ),
+                                ],
+                              ),
                             ),
                           ),
                         ],
