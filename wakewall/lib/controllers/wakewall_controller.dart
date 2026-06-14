@@ -1,3 +1,4 @@
+import 'dart:collection';
 import 'dart:math' as math;
 
 import 'package:flutter/foundation.dart';
@@ -29,12 +30,12 @@ class WakeWallController extends ChangeNotifier {
   String? _lastNativeError;
   Future<void>? _initialization;
 
-  List<Wallpaper> get wallpapers => List.unmodifiable(_wallpapers);
-  List<WallpaperAlbum> get albums => List.unmodifiable(_albums);
-  Set<String> get activeAlbumIds => Set.unmodifiable(_activeAlbumIds);
+  List<Wallpaper> get wallpapers => UnmodifiableListView(_wallpapers);
+  List<WallpaperAlbum> get albums => UnmodifiableListView(_albums);
+  Set<String> get activeAlbumIds => UnmodifiableSetView(_activeAlbumIds);
   bool get askAlbumsAfterImport => _askAlbumsAfterImport;
   Set<String> get defaultImportAlbumIds =>
-      Set.unmodifiable(_defaultImportAlbumIds);
+      UnmodifiableSetView(_defaultImportAlbumIds);
   int get selectedIndex => _selectedIndex;
   ValueListenable<int> get selectedIndexListenable => _selectedIndexNotifier;
   bool get hasWallpapers => _wallpapers.isNotEmpty;

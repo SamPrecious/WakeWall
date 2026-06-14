@@ -15,6 +15,7 @@ class AbstractWallpaper extends StatelessWidget {
     this.fitBackgroundColor,
     this.previewBytes,
     this.applyCrop = true,
+    this.filterQuality = FilterQuality.high,
     super.key,
   });
 
@@ -25,6 +26,7 @@ class AbstractWallpaper extends StatelessWidget {
   final Color? fitBackgroundColor;
   final Uint8List? previewBytes;
   final bool applyCrop;
+  final FilterQuality filterQuality;
 
   @override
   Widget build(BuildContext context) {
@@ -44,7 +46,7 @@ class AbstractWallpaper extends StatelessWidget {
               height: constraints.maxHeight,
               fit: BoxFit.cover,
               gaplessPlayback: true,
-              filterQuality: FilterQuality.high,
+              filterQuality: filterQuality,
             );
           }
           final useFullSource =
@@ -110,7 +112,7 @@ class AbstractWallpaper extends StatelessWidget {
                           imageBytes,
                           fit: BoxFit.contain,
                           gaplessPlayback: true,
-                          filterQuality: FilterQuality.high,
+                          filterQuality: filterQuality,
                         ),
                       ),
                     ),
@@ -158,7 +160,7 @@ class AbstractWallpaper extends StatelessWidget {
                       imageBytes,
                       fit: BoxFit.cover,
                       gaplessPlayback: true,
-                      filterQuality: FilterQuality.high,
+                      filterQuality: filterQuality,
                     ),
                   ),
                 ),
@@ -179,7 +181,7 @@ class AbstractWallpaper extends StatelessWidget {
                       height: constraints.maxHeight,
                       fit: BoxFit.cover,
                       gaplessPlayback: true,
-                      filterQuality: FilterQuality.high,
+                      filterQuality: filterQuality,
                     )
                   : wallpaper.isUserImage
                   ? const ColoredBox(

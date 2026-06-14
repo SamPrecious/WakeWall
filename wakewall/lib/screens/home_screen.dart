@@ -90,12 +90,14 @@ class _HomeScreenState extends State<HomeScreen> {
   void initState() {
     super.initState();
     controller.addListener(_schedulePreviewWarmup);
+    controller.selectedIndexListenable.addListener(_schedulePreviewWarmup);
     _schedulePreviewWarmup();
   }
 
   @override
   void dispose() {
     controller.removeListener(_schedulePreviewWarmup);
+    controller.selectedIndexListenable.removeListener(_schedulePreviewWarmup);
     super.dispose();
   }
 
@@ -106,7 +108,21 @@ class _HomeScreenState extends State<HomeScreen> {
     WidgetsBinding.instance.addPostFrameCallback((_) async {
       previewWarmupScheduled = false;
       if (!mounted) return;
-      for (final wallpaper in controller.wallpapers) {
+      final wallpapers = controller.wallpapers;
+      if (wallpapers.isEmpty) return;
+      final start = controller.selectedIndex
+          .clamp(0, wallpapers.length - 1)
+          .toInt();
+      final warmupIndexes = <int>{
+        start,
+        if (wallpapers.length > 1) (start + 1) % wallpapers.length,
+        if (wallpapers.length > 2) (start + 2) % wallpapers.length,
+        if (wallpapers.length > 1) (start - 1) % wallpapers.length,
+      };
+      final warmupWallpapers = [
+        for (final index in warmupIndexes) wallpapers[index],
+      ];
+      for (final wallpaper in warmupWallpapers) {
         final bytes = wallpaper.mainPreview;
         if (bytes == null) continue;
         final cacheKey = '${wallpaper.id}:${identityHashCode(bytes)}';
@@ -179,19 +195,21 @@ class _HomeScreenState extends State<HomeScreen> {
                             height: previewHeight,
                             child: Align(
                               alignment: Alignment.topCenter,
-                              child: _Preview(
-                                controller: controller,
-                                maximumHeight: previewHeight,
-                                draggingWallpaper: draggingWallpaper,
-                                onRemoveWallpaper: _removeWallpaper,
-                                onAdd: _addImages,
-                                onAlbums: _showCurrentWallpaperAlbums,
-                                onResume: () =>
-                                    unawaited(controller.setPaused(false)),
-                                onCrop: () => context.router.push(
-                                  CropEditorRoute(
-                                    controller: controller,
-                                    wallpaperIndex: controller.selectedIndex,
+                              child: RepaintBoundary(
+                                child: _Preview(
+                                  controller: controller,
+                                  maximumHeight: previewHeight,
+                                  draggingWallpaper: draggingWallpaper,
+                                  onRemoveWallpaper: _removeWallpaper,
+                                  onAdd: _addImages,
+                                  onAlbums: _showCurrentWallpaperAlbums,
+                                  onResume: () =>
+                                      unawaited(controller.setPaused(false)),
+                                  onCrop: () => context.router.push(
+                                    CropEditorRoute(
+                                      controller: controller,
+                                      wallpaperIndex: controller.selectedIndex,
+                                    ),
                                   ),
                                 ),
                               ),
@@ -200,14 +218,18 @@ class _HomeScreenState extends State<HomeScreen> {
                           if (controller.hasWallpapers)
                             SizedBox(
                               height: collectionHeight,
-                              child: _WallpaperStrip(
-                                controller: controller,
-                                horizontalPadding: horizontalPadding,
-                                onAdd: _addImages,
-                                onDragChanged: (dragging) {
-                                  if (draggingWallpaper == dragging) return;
-                                  setState(() => draggingWallpaper = dragging);
-                                },
+                              child: RepaintBoundary(
+                                child: _WallpaperStrip(
+                                  controller: controller,
+                                  horizontalPadding: horizontalPadding,
+                                  onAdd: _addImages,
+                                  onDragChanged: (dragging) {
+                                    if (draggingWallpaper == dragging) return;
+                                    setState(
+                                      () => draggingWallpaper = dragging,
+                                    );
+                                  },
+                                ),
                               ),
                             ),
                           SizedBox(height: bottomGap),
@@ -625,13 +647,14 @@ class _Preview extends StatelessWidget {
                     key: const ValueKey('populated'),
                     valueListenable: controller.selectedIndexListenable,
                     builder: (context, selectedIndex, _) {
-                      if (controller.wallpapers.isEmpty) {
+                      final wallpapers = controller.wallpapers;
+                      if (wallpapers.isEmpty) {
                         return _EmptyPreview(onAdd: onAdd);
                       }
                       final boundedIndex = selectedIndex
-                          .clamp(0, controller.wallpapers.length - 1)
+                          .clamp(0, wallpapers.length - 1)
                           .toInt();
-                      final wallpaper = controller.wallpapers[boundedIndex];
+                      final wallpaper = wallpapers[boundedIndex];
                       final previewBytes =
                           wallpaper.mainPreview ?? wallpaper.preview;
                       return Stack(
@@ -927,8 +950,9 @@ class _WallpaperStripState extends State<_WallpaperStrip> {
 
   // Starts decoding the large preview while the user's finger is still down.
   void warmPreview(int index) {
-    final preview = controller.wallpapers[index].preview;
-    final mainPreview = controller.wallpapers[index].mainPreview;
+    final wallpapers = controller.wallpapers;
+    final preview = wallpapers[index].preview;
+    final mainPreview = wallpapers[index].mainPreview;
     if (mainPreview != null) {
       precacheImage(MemoryImage(mainPreview), context);
     } else if (preview != null) {
@@ -948,17 +972,14 @@ class _WallpaperStripState extends State<_WallpaperStrip> {
   void commitSelection(int index) {
     final serial = ++selectionSerial;
     previewSelection(index);
-    WidgetsBinding.instance.addPostFrameCallback((_) {
-      if (!mounted || serial != selectionSerial) return;
-      warmPreview(index);
-      unawaited(
-        controller.select(index).whenComplete(() {
-          if (mounted && serial == selectionSerial) {
-            setState(() => optimisticSelectedIndex = null);
-          }
-        }),
-      );
-    });
+    warmPreview(index);
+    unawaited(
+      controller.select(index).whenComplete(() {
+        if (mounted && serial == selectionSerial) {
+          setState(() => optimisticSelectedIndex = null);
+        }
+      }),
+    );
   }
 
   @override
@@ -966,6 +987,7 @@ class _WallpaperStripState extends State<_WallpaperStrip> {
     return ValueListenableBuilder<int>(
       valueListenable: controller.selectedIndexListenable,
       builder: (context, selectedIndex, _) {
+        final wallpapers = controller.wallpapers;
         return Column(
           children: [
             Row(
@@ -1018,12 +1040,12 @@ class _WallpaperStripState extends State<_WallpaperStrip> {
                           horizontal: widget.horizontalPadding,
                         ),
                         scrollDirection: Axis.horizontal,
-                        itemCount: controller.wallpapers.length,
+                        itemCount: wallpapers.length,
                         separatorBuilder: (_, _) => const SizedBox(width: 5.9),
                         itemBuilder: (context, index) {
                           final selected = index == activeIndex;
                           final tile = _WallpaperTile(
-                            wallpaper: controller.wallpapers[index],
+                            wallpaper: wallpapers[index],
                             selected: selected,
                             width: tileWidth,
                             height: tileHeight,
@@ -1072,7 +1094,7 @@ class _WallpaperStripState extends State<_WallpaperStrip> {
                                     button: true,
                                     selected: selected,
                                     label:
-                                        '${controller.wallpapers[index].name}, wallpaper ${index + 1} of ${controller.wallpapers.length}',
+                                        '${wallpapers[index].name}, wallpaper ${index + 1} of ${wallpapers.length}',
                                     hint:
                                         'Double tap to preview. Long press to reorder or remove.',
                                     child: Listener(
@@ -1140,6 +1162,7 @@ class _WallpaperTile extends StatelessWidget {
         wallpaper: wallpaper,
         applyCrop: wallpaper.thumbnail == null,
         borderRadius: BorderRadius.circular(10.5),
+        filterQuality: FilterQuality.medium,
       ),
     );
   }

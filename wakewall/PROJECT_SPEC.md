@@ -282,6 +282,11 @@ placed directly beside the feature it controls.
   native sync or heavier preview work completes.
 - Selected-wallpaper changes should use the lightweight selected-index listener
   rather than forcing a full home-screen rebuild.
+- Thumbnail taps should update the selected wallpaper immediately; native
+  `setCurrent` sync stays asynchronous and must not delay the visible preview.
+- Preview warmup should focus on the selected and nearby wallpapers rather than
+  eagerly decoding an entire large collection.
+- `Up Next` thumbnails may use cheaper image filtering than the large preview.
 - The large preview may use a short local fade when the selected wallpaper
   changes, but overlay controls should stay stable.
 - Album filter taps keep sheet feedback local and debounce native filter sync so
