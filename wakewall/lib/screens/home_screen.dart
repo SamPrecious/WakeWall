@@ -660,20 +660,11 @@ class _Preview extends StatelessWidget {
                       return Stack(
                         fit: StackFit.expand,
                         children: [
-                          AnimatedSwitcher(
-                            duration: const Duration(milliseconds: 220),
-                            reverseDuration: const Duration(milliseconds: 160),
-                            switchInCurve: Curves.easeOut,
-                            switchOutCurve: Curves.easeIn,
-                            child: AbstractWallpaper(
-                              key: ValueKey(
-                                'preview-${wallpaper.id}-${identityHashCode(previewBytes)}',
-                              ),
-                              wallpaper: wallpaper,
-                              previewBytes: previewBytes,
-                              applyCrop: wallpaper.mainPreview == null,
-                              borderRadius: radius,
-                            ),
+                          AbstractWallpaper(
+                            wallpaper: wallpaper,
+                            previewBytes: previewBytes,
+                            applyCrop: wallpaper.mainPreview == null,
+                            borderRadius: radius,
                           ),
                           Positioned(
                             left: 0,
@@ -683,7 +674,7 @@ class _Preview extends StatelessWidget {
                               child: AnimatedSwitcher(
                                 duration: const Duration(milliseconds: 240),
                                 reverseDuration: const Duration(
-                                  milliseconds: 180,
+                                  milliseconds: 260,
                                 ),
                                 switchInCurve: Curves.easeOut,
                                 switchOutCurve: Curves.easeIn,

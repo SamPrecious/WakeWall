@@ -78,7 +78,7 @@ personalisation app, not a technical background utility.
 - When paused, a compact centred `Paused` overlay appears near the top of the
   large preview and acts as a quick resume control. It uses high-contrast white
   content on a charcoal translucent background so it remains readable over
-  bright wallpapers, and fades in and out like the crop reset overlay.
+  bright wallpapers, with a slightly softer fade-out when resuming.
 
 ### Main Navigation
 
@@ -287,8 +287,8 @@ placed directly beside the feature it controls.
 - Preview warmup should focus on the selected and nearby wallpapers rather than
   eagerly decoding an entire large collection.
 - `Up Next` thumbnails may use cheaper image filtering than the large preview.
-- The large preview may use a short local fade when the selected wallpaper
-  changes, but overlay controls should stay stable.
+- The large preview switches selected wallpapers directly, without a local fade,
+  so thumbnail taps feel immediate.
 - Album filter taps keep sheet feedback local and debounce native filter sync so
   the checkmark animation is not competing with wallpaper-list refresh work.
 - Crop-editor header actions should keep stable positions.
