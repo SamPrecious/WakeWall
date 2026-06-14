@@ -141,6 +141,7 @@ void main() {
     expect(find.text('System'), findsOneWidget);
     expect(find.text('Light'), findsOneWidget);
     expect(find.text('Dark'), findsOneWidget);
+    expect(find.text('Midnight'), findsOneWidget);
     expect(find.text('Fit mode'), findsNothing);
     expect(find.text('Backup'), findsOneWidget);
     expect(find.text('Restore'), findsOneWidget);
@@ -185,6 +186,11 @@ void main() {
     await tester.pumpAndSettle();
     expect(controller.themeMode, WakeWallThemeMode.dark);
     expect(bridge.themeMode, 'dark');
+
+    await tester.tap(find.text('Midnight'));
+    await tester.pumpAndSettle();
+    expect(controller.themeMode, WakeWallThemeMode.midnight);
+    expect(bridge.themeMode, 'midnight');
   });
 
   testWidgets('wallpaper scrolling stays off until its warning is accepted', (
@@ -285,7 +291,7 @@ void main() {
 
     expect(find.text('WakeWall'), findsOneWidget);
     expect(find.text('Up Next'), findsOneWidget);
-    expect(find.text('ADD'), findsOneWidget);
+    expect(find.text('Add'), findsOneWidget);
 
     final firstThumbnail = tester.getSize(
       find.byKey(const ValueKey('wallpaper-thumbnail-tidal')),

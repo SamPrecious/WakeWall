@@ -545,6 +545,7 @@ class _Header extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final colors = context.wakeWallColors;
+    final titleColor = colors.isMidnight ? colors.tealStrong : colors.onSurface;
     return Stack(
       alignment: Alignment.center,
       children: [
@@ -558,7 +559,7 @@ class _Header extends StatelessWidget {
                 'WakeWall',
                 style: Theme.of(
                   context,
-                ).textTheme.displaySmall?.copyWith(color: colors.onSurface),
+                ).textTheme.displaySmall?.copyWith(color: titleColor),
               ),
             ),
           ),
@@ -598,6 +599,7 @@ class _HeaderActionButton extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final colors = context.wakeWallColors;
+    final iconColor = colors.isMidnight ? colors.tealStrong : colors.teal;
     return Tooltip(
       message: tooltip,
       child: Material(
@@ -615,7 +617,7 @@ class _HeaderActionButton extends StatelessWidget {
               borderRadius: BorderRadius.circular(13),
               border: Border.all(color: Colors.transparent),
             ),
-            child: Icon(icon, color: colors.teal, size: 22),
+            child: Icon(icon, color: iconColor, size: 22),
           ),
         ),
       ),
@@ -1013,6 +1015,9 @@ class _WallpaperStripState extends State<_WallpaperStrip> {
   @override
   Widget build(BuildContext context) {
     final colors = context.wakeWallColors;
+    final stripLabelStyle = Theme.of(
+      context,
+    ).textTheme.labelLarge?.copyWith(fontSize: 15.5, letterSpacing: 1.2);
     return ValueListenableBuilder<int>(
       valueListenable: controller.selectedIndexListenable,
       builder: (context, selectedIndex, _) {
@@ -1023,9 +1028,8 @@ class _WallpaperStripState extends State<_WallpaperStrip> {
               children: [
                 Text(
                   'Up Next',
-                  style: Theme.of(context).textTheme.labelLarge?.copyWith(
-                    fontSize: 15.5,
-                    letterSpacing: 1.2,
+                  style: stripLabelStyle?.copyWith(
+                    color: colors.isMidnight ? colors.tealStrong : null,
                   ),
                 ),
                 const Spacer(),
@@ -1033,7 +1037,13 @@ class _WallpaperStripState extends State<_WallpaperStrip> {
                   onPressed: widget.onAdd,
                   iconAlignment: IconAlignment.end,
                   icon: const Icon(Icons.add_rounded, size: 19),
-                  label: const Text('ADD'),
+                  label: Text(
+                    'Add',
+                    style: stripLabelStyle?.copyWith(
+                      color: colors.tealStrong,
+                      letterSpacing: .2,
+                    ),
+                  ),
                   style: TextButton.styleFrom(
                     foregroundColor: colors.tealStrong,
                     padding: const EdgeInsets.symmetric(horizontal: 0),
@@ -1746,7 +1756,7 @@ class _SettingsSheetState extends State<_SettingsSheet> {
                   _SegmentedSetting(
                     label: 'Theme',
                     icon: Icons.brightness_auto_outlined,
-                    options: const ['System', 'Light', 'Dark'],
+                    options: const ['System', 'Light', 'Dark', 'Midnight'],
                     selectedIndex: controller.themeMode.index,
                     onSelected: (index) => controller.setThemeMode(
                       WakeWallThemeMode.values[index],
@@ -2128,7 +2138,13 @@ class _SegmentedSetting extends StatelessWidget {
             child: SegmentedButton<int>(
               segments: [
                 for (var i = 0; i < options.length; i++)
-                  ButtonSegment(value: i, label: Text(options[i])),
+                  ButtonSegment(
+                    value: i,
+                    label: FittedBox(
+                      fit: BoxFit.scaleDown,
+                      child: Text(options[i]),
+                    ),
+                  ),
               ],
               selected: {selectedIndex},
               onSelectionChanged: (selection) {
@@ -2142,6 +2158,7 @@ class _SegmentedSetting extends StatelessWidget {
                 selectedForegroundColor: colors.ink,
                 backgroundColor: colors.raisedSurface,
                 foregroundColor: colors.muted,
+                visualDensity: VisualDensity.compact,
               ),
             ),
           ),

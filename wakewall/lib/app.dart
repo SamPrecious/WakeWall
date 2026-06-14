@@ -55,9 +55,12 @@ class _WakeWallAppState extends State<WakeWallApp> with WidgetsBindingObserver {
             WakeWallThemeMode.system => ThemeMode.system,
             WakeWallThemeMode.light => ThemeMode.light,
             WakeWallThemeMode.dark => ThemeMode.dark,
+            WakeWallThemeMode.midnight => ThemeMode.dark,
           },
           theme: WakeWallTheme.light,
-          darkTheme: WakeWallTheme.dark,
+          darkTheme: controller.themeMode == WakeWallThemeMode.midnight
+              ? WakeWallTheme.midnight
+              : WakeWallTheme.dark,
           routerConfig: router.config(
             deepLinkBuilder: (_) =>
                 DeepLink([HomeRoute(controller: controller)]),

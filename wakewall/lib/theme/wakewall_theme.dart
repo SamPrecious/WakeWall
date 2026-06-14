@@ -108,11 +108,31 @@ abstract final class WakeWallColors {
     danger: Color(0xFFB3261E),
     onSurface: Color(0xFF202124),
   );
+
+  static const midnight = WakeWallPalette(
+    background: Color(0xFF000000),
+    surface: Color(0xFF08090B),
+    raisedSurface: Color(0xFF121318),
+    outline: Color(0xFF2B2F38),
+    muted: Color(0xFF747C89),
+    teal: Color(0xFF343A46),
+    tealStrong: Color(0xFFAAB2BF),
+    ink: Color(0xFFC5CBD5),
+    danger: Color(0xFFBFA8A8),
+    onSurface: Color(0xFFA0A7B3),
+  );
 }
 
 extension WakeWallPaletteContext on BuildContext {
   WakeWallPalette get wakeWallColors =>
       Theme.of(this).extension<WakeWallPalette>() ?? WakeWallColors.dark;
+}
+
+extension WakeWallPaletteStyle on WakeWallPalette {
+  bool get isMidnight =>
+      background == WakeWallColors.midnight.background &&
+      surface == WakeWallColors.midnight.surface &&
+      raisedSurface == WakeWallColors.midnight.raisedSurface;
 }
 
 abstract final class WakeWallTheme {
@@ -121,6 +141,9 @@ abstract final class WakeWallTheme {
 
   static ThemeData get light =>
       _build(brightness: Brightness.light, colors: WakeWallColors.light);
+
+  static ThemeData get midnight =>
+      _build(brightness: Brightness.dark, colors: WakeWallColors.midnight);
 
   static ThemeData _build({
     required Brightness brightness,
@@ -144,6 +167,38 @@ abstract final class WakeWallTheme {
             error: colors.danger,
           );
 
+    final textColor = colors.onSurface;
+    final textTheme = TextTheme(
+      displaySmall: TextStyle(
+        color: textColor,
+        fontSize: 38,
+        height: 1,
+        fontWeight: FontWeight.w700,
+        letterSpacing: -1.5,
+      ),
+      headlineSmall: TextStyle(color: textColor),
+      titleLarge: TextStyle(
+        color: textColor,
+        fontSize: 20,
+        fontWeight: FontWeight.w700,
+      ),
+      titleMedium: TextStyle(
+        color: textColor,
+        fontSize: 15,
+        fontWeight: FontWeight.w700,
+      ),
+      bodyLarge: TextStyle(color: textColor, fontSize: 16, height: 1.35),
+      bodyMedium: TextStyle(color: textColor, fontSize: 14, height: 1.35),
+      bodySmall: TextStyle(color: textColor),
+      labelLarge: TextStyle(
+        color: textColor,
+        fontSize: 14,
+        fontWeight: FontWeight.w700,
+        letterSpacing: .2,
+      ),
+      labelSmall: TextStyle(color: textColor),
+    );
+
     return ThemeData(
       brightness: brightness,
       colorScheme: scheme,
@@ -151,23 +206,8 @@ abstract final class WakeWallTheme {
       fontFamily: 'sans-serif',
       splashFactory: InkSparkle.splashFactory,
       extensions: [colors],
-      textTheme: TextTheme(
-        displaySmall: TextStyle(
-          fontSize: 38,
-          height: 1,
-          fontWeight: FontWeight.w700,
-          letterSpacing: -1.5,
-        ),
-        titleLarge: TextStyle(fontSize: 20, fontWeight: FontWeight.w700),
-        titleMedium: TextStyle(fontSize: 15, fontWeight: FontWeight.w700),
-        bodyLarge: TextStyle(fontSize: 16, height: 1.35),
-        bodyMedium: TextStyle(fontSize: 14, height: 1.35),
-        labelLarge: TextStyle(
-          fontSize: 14,
-          fontWeight: FontWeight.w700,
-          letterSpacing: .2,
-        ),
-      ),
+      textTheme: textTheme,
+      primaryTextTheme: textTheme,
       iconTheme: IconThemeData(color: colors.teal, size: 23),
       bottomSheetTheme: BottomSheetThemeData(
         backgroundColor: colors.surface,

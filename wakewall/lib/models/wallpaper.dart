@@ -10,7 +10,7 @@ enum RotationOrder { sequential, shuffle }
 
 enum PhotoSource { askEveryTime, photos, files }
 
-enum WakeWallThemeMode { system, light, dark }
+enum WakeWallThemeMode { system, light, dark, midnight }
 
 class WallpaperAlbum {
   const WallpaperAlbum({required this.id, required this.name});

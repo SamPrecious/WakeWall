@@ -1606,7 +1606,7 @@ class WakeWallStore(context: Context) {
         private const val DEFAULT_FIT_BACKGROUND_COLOR = 0xFF202124.toInt()
         private val DISPLAY_MODES = setOf(DISPLAY_MODE_FILL, DISPLAY_MODE_FIT, DISPLAY_MODE_BLUR)
         private const val THEME_MODE_SYSTEM = "system"
-        private val THEME_MODES = setOf(THEME_MODE_SYSTEM, "light", "dark")
+        private val THEME_MODES = setOf(THEME_MODE_SYSTEM, "light", "dark", "midnight")
         const val REMOVAL_UNDO_WINDOW_MS = 3_000L
     }
 }
