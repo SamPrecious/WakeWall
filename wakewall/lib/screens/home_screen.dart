@@ -14,6 +14,7 @@ import '../widgets/abstract_wallpaper.dart';
 
 const _noticeVisibleDuration = Duration(milliseconds: 2800);
 const _noticeFadeDuration = Duration(milliseconds: 180);
+const _wallpaperStripHeaderHeight = 34.0;
 
 void _wakeWallTapHaptic() {
   HapticFeedback.selectionClick();
@@ -21,6 +22,24 @@ void _wakeWallTapHaptic() {
 
 void _wakeWallCommitHaptic() {
   HapticFeedback.mediumImpact();
+}
+
+Color _wakeWallProminentTextColor(BuildContext context) {
+  final colors = context.wakeWallColors;
+  if (colors.isMidnight) return colors.tealStrong;
+  if (Theme.of(context).brightness == Brightness.dark) return Colors.white;
+  return colors.onSurface;
+}
+
+double _wakeWallPhoneRatio(BuildContext context) {
+  final physicalSize = View.of(context).physicalSize;
+  final displayWidth = math.min(physicalSize.width, physicalSize.height);
+  final displayHeight = math.max(physicalSize.width, physicalSize.height);
+  if (displayWidth > 0 && displayHeight > 0) {
+    return (displayWidth / displayHeight).clamp(.44, .62).toDouble();
+  }
+  final screen = MediaQuery.sizeOf(context);
+  return (screen.width / screen.height).clamp(.44, .62).toDouble();
 }
 
 // Shows every short app message with the same compact Android-style layout.
@@ -163,19 +182,19 @@ class _HomeScreenState extends State<HomeScreen> {
                     final horizontalPadding = constraints.maxWidth < 420
                         ? 20.0
                         : 28.0;
-                    final headerHeight = 88.0;
+                    final headerHeight = 60.0;
                     final bottomGap = bottomInset > 24 ? 10.0 : 18.0;
                     final usableHeight =
                         constraints.maxHeight - headerHeight - bottomGap;
                     final minimumPreviewHeight = controller.hasWallpapers
                         ? 300.0
                         : 340.0;
-                    // Size the thumbnails themselves proportionally, then add the fixed label row.
-                    final targetTileHeight = (usableHeight * .113)
-                        .clamp(80.5, 89.7)
+                    // Size the thumbnail row first so the main preview gets the remaining space.
+                    final targetTileHeight = (usableHeight * .1356)
+                        .clamp(96.6, 107.6)
                         .toDouble();
                     final targetCollectionHeight =
-                        48.0 + targetTileHeight / .86;
+                        _wallpaperStripHeaderHeight + targetTileHeight;
                     final maximumCollectionHeight = math.max(
                       112.0,
                       usableHeight - minimumPreviewHeight,
@@ -544,8 +563,7 @@ class _Header extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final colors = context.wakeWallColors;
-    final titleColor = colors.isMidnight ? colors.tealStrong : colors.onSurface;
+    final titleColor = _wakeWallProminentTextColor(context);
     return Stack(
       alignment: Alignment.center,
       children: [
@@ -649,8 +667,7 @@ class _Preview extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final colors = context.wakeWallColors;
-    final screen = MediaQuery.sizeOf(context);
-    final phoneRatio = (screen.width / screen.height).clamp(.44, .62);
+    final phoneRatio = _wakeWallPhoneRatio(context);
     final availableWidth = MediaQuery.sizeOf(context).width - 40;
     final heightFromWidth = availableWidth / phoneRatio;
     final height = heightFromWidth.clamp(0, maximumHeight).toDouble();
@@ -823,6 +840,7 @@ class _PausedPreviewButton extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final foregroundColor = _wakeWallProminentTextColor(context);
     return Tooltip(
       message: 'Resume WakeWall',
       child: Material(
@@ -843,16 +861,12 @@ class _PausedPreviewButton extends StatelessWidget {
             child: Row(
               mainAxisSize: MainAxisSize.min,
               children: [
-                const Icon(
-                  Icons.pause_rounded,
-                  color: Color(0xFFE3E3E8),
-                  size: 16,
-                ),
+                Icon(Icons.pause_rounded, color: foregroundColor, size: 16),
                 const SizedBox(width: 6),
                 Text(
                   'Paused',
                   style: Theme.of(context).textTheme.labelLarge?.copyWith(
-                    color: const Color(0xFFE3E3E8),
+                    color: foregroundColor,
                     fontSize: 13,
                   ),
                 ),
@@ -912,6 +926,8 @@ class _OverlayButton extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final colors = context.wakeWallColors;
+    final iconColor = colors.isMidnight ? colors.tealStrong : Colors.white;
     return Tooltip(
       message: tooltip,
       child: Material(
@@ -923,7 +939,7 @@ class _OverlayButton extends StatelessWidget {
           child: SizedBox(
             width: 48,
             height: 48,
-            child: Icon(icon, color: const Color(0xFFE3E3E8), size: 21),
+            child: Icon(icon, color: iconColor, size: 21),
           ),
         ),
       ),
@@ -1015,6 +1031,7 @@ class _WallpaperStripState extends State<_WallpaperStrip> {
   @override
   Widget build(BuildContext context) {
     final colors = context.wakeWallColors;
+    final headingColor = _wakeWallProminentTextColor(context);
     final stripLabelStyle = Theme.of(
       context,
     ).textTheme.labelLarge?.copyWith(fontSize: 15.5, letterSpacing: 1.2);
@@ -1024,32 +1041,36 @@ class _WallpaperStripState extends State<_WallpaperStrip> {
         final wallpapers = controller.wallpapers;
         return Column(
           children: [
-            Row(
-              children: [
-                Text(
-                  'Up Next',
-                  style: stripLabelStyle?.copyWith(
-                    color: colors.isMidnight ? colors.tealStrong : null,
+            SizedBox(
+              height: _wallpaperStripHeaderHeight,
+              child: Row(
+                children: [
+                  Text(
+                    'Up Next',
+                    style: stripLabelStyle?.copyWith(color: headingColor),
                   ),
-                ),
-                const Spacer(),
-                TextButton.icon(
-                  onPressed: widget.onAdd,
-                  iconAlignment: IconAlignment.end,
-                  icon: const Icon(Icons.add_rounded, size: 19),
-                  label: Text(
-                    'Add',
-                    style: stripLabelStyle?.copyWith(
-                      color: colors.tealStrong,
-                      letterSpacing: .2,
+                  const Spacer(),
+                  TextButton.icon(
+                    onPressed: widget.onAdd,
+                    iconAlignment: IconAlignment.end,
+                    icon: const Icon(Icons.add_rounded, size: 19),
+                    label: Text(
+                      'Add',
+                      style: stripLabelStyle?.copyWith(
+                        color: colors.tealStrong,
+                        letterSpacing: .2,
+                      ),
+                    ),
+                    style: TextButton.styleFrom(
+                      foregroundColor: colors.tealStrong,
+                      minimumSize: Size.zero,
+                      padding: const EdgeInsets.symmetric(horizontal: 0),
+                      tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                      visualDensity: VisualDensity.compact,
                     ),
                   ),
-                  style: TextButton.styleFrom(
-                    foregroundColor: colors.tealStrong,
-                    padding: const EdgeInsets.symmetric(horizontal: 0),
-                  ),
-                ),
-              ],
+                ],
+              ),
             ),
             Expanded(
               child: OverflowBox(
@@ -1059,16 +1080,13 @@ class _WallpaperStripState extends State<_WallpaperStrip> {
                   width: MediaQuery.sizeOf(context).width,
                   child: LayoutBuilder(
                     builder: (context, constraints) {
-                      final screen = MediaQuery.sizeOf(context);
-                      final phoneRatio = (screen.width / screen.height).clamp(
-                        .44,
-                        .62,
-                      );
-                      final tileHeight = math.min(
+                      final phoneRatio = _wakeWallPhoneRatio(context);
+                      final fullTileHeight = math.min(
                         constraints.maxHeight,
-                        math.max(89.7, constraints.maxHeight * .86),
+                        math.max(89.7, constraints.maxHeight),
                       );
-                      final tileWidth = tileHeight * phoneRatio;
+                      final tileWidth = fullTileHeight * phoneRatio;
+                      final tileHeight = fullTileHeight * .85;
                       final activeIndex =
                           optimisticSelectedIndex ?? selectedIndex;
 
@@ -1080,7 +1098,7 @@ class _WallpaperStripState extends State<_WallpaperStrip> {
                         ),
                         scrollDirection: Axis.horizontal,
                         itemCount: wallpapers.length,
-                        separatorBuilder: (_, _) => const SizedBox(width: 5.9),
+                        separatorBuilder: (_, _) => const SizedBox(width: 5.6),
                         itemBuilder: (context, index) {
                           final selected = index == activeIndex;
                           final tile = _WallpaperTile(
@@ -1242,6 +1260,7 @@ class _AlbumsSheetState extends State<_AlbumsSheet> {
   @override
   Widget build(BuildContext context) {
     final colors = context.wakeWallColors;
+    final titleColor = _wakeWallProminentTextColor(context);
     return SingleChildScrollView(
       padding: _bottomSheetPadding(context, left: 20, top: 6, right: 20),
       child: Column(
@@ -1250,7 +1269,12 @@ class _AlbumsSheetState extends State<_AlbumsSheet> {
         children: [
           Row(
             children: [
-              Text('Albums', style: Theme.of(context).textTheme.titleLarge),
+              Text(
+                'Albums',
+                style: Theme.of(
+                  context,
+                ).textTheme.titleLarge?.copyWith(color: titleColor),
+              ),
               const Spacer(),
               IconButton(
                 onPressed: () {
@@ -1425,6 +1449,7 @@ class _AssignAlbumsSheetState extends State<_AssignAlbumsSheet> {
   @override
   Widget build(BuildContext context) {
     final colors = context.wakeWallColors;
+    final titleColor = _wakeWallProminentTextColor(context);
     return SingleChildScrollView(
       padding: _bottomSheetPadding(context, left: 20, top: 6, right: 20),
       child: Column(
@@ -1433,7 +1458,12 @@ class _AssignAlbumsSheetState extends State<_AssignAlbumsSheet> {
         children: [
           Row(
             children: [
-              Text('Albums', style: Theme.of(context).textTheme.titleLarge),
+              Text(
+                'Albums',
+                style: Theme.of(
+                  context,
+                ).textTheme.titleLarge?.copyWith(color: titleColor),
+              ),
               const Spacer(),
               IconButton(
                 onPressed: () {
@@ -1449,7 +1479,7 @@ class _AssignAlbumsSheetState extends State<_AssignAlbumsSheet> {
           if (widget.isImport)
             CheckboxListTile(
               contentPadding: EdgeInsets.zero,
-              title: const Text('No Album'),
+              title: Text('No Album', style: TextStyle(color: titleColor)),
               value: selected.isEmpty,
               onChanged: (_) {
                 _wakeWallTapHaptic();
@@ -1459,7 +1489,7 @@ class _AssignAlbumsSheetState extends State<_AssignAlbumsSheet> {
           for (final album in widget.controller.albums)
             CheckboxListTile(
               contentPadding: EdgeInsets.zero,
-              title: Text(album.name),
+              title: Text(album.name, style: TextStyle(color: titleColor)),
               value: selected.contains(album.id),
               onChanged: (_) {
                 _wakeWallTapHaptic();
@@ -1540,50 +1570,65 @@ class _AlbumFilterTile extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final colors = context.wakeWallColors;
+    final titleColor = _wakeWallProminentTextColor(context);
+    final titleStyle = Theme.of(context).textTheme.titleMedium;
     return Semantics(
       button: true,
       selected: selected,
       child: Material(
         color: Colors.transparent,
-        child: InkWell(
-          onTap: () {
-            _wakeWallTapHaptic();
-            onTap();
-          },
-          onLongPress: onLongPress == null
-              ? null
-              : () {
-                  _wakeWallCommitHaptic();
-                  onLongPress!();
-                },
-          splashFactory: NoSplash.splashFactory,
-          overlayColor: const WidgetStatePropertyAll(Colors.transparent),
-          borderRadius: BorderRadius.circular(12),
-          child: Padding(
-            padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 14),
-            child: Row(
-              children: [
-                Icon(icon),
-                const SizedBox(width: 22),
-                Expanded(
-                  child: Text(
-                    title,
-                    style: Theme.of(context).textTheme.titleMedium,
+        child: AnimatedContainer(
+          duration: const Duration(milliseconds: 160),
+          curve: Curves.easeOut,
+          decoration: BoxDecoration(
+            color: selected
+                ? colors.tealStrong.withValues(alpha: .10)
+                : Colors.transparent,
+            borderRadius: BorderRadius.circular(12),
+          ),
+          child: InkWell(
+            onTap: () {
+              _wakeWallTapHaptic();
+              onTap();
+            },
+            onLongPress: onLongPress == null
+                ? null
+                : () {
+                    _wakeWallCommitHaptic();
+                    onLongPress!();
+                  },
+            splashFactory: NoSplash.splashFactory,
+            overlayColor: const WidgetStatePropertyAll(Colors.transparent),
+            borderRadius: BorderRadius.circular(12),
+            child: Padding(
+              padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 14),
+              child: Row(
+                children: [
+                  Icon(icon, color: selected ? colors.tealStrong : null),
+                  const SizedBox(width: 22),
+                  Expanded(
+                    child: Text(
+                      title,
+                      style: titleStyle?.copyWith(
+                        color: titleColor,
+                        fontSize: (titleStyle.fontSize ?? 15) * 1.15,
+                      ),
+                    ),
                   ),
-                ),
-                AnimatedSwitcher(
-                  duration: const Duration(milliseconds: 90),
-                  switchInCurve: Curves.easeOut,
-                  switchOutCurve: Curves.easeIn,
-                  child: Icon(
-                    selected
-                        ? Icons.check_circle_rounded
-                        : Icons.circle_outlined,
-                    key: ValueKey(selected),
-                    color: selected ? colors.tealStrong : colors.muted,
+                  AnimatedSwitcher(
+                    duration: const Duration(milliseconds: 90),
+                    switchInCurve: Curves.easeOut,
+                    switchOutCurve: Curves.easeIn,
+                    child: Icon(
+                      selected
+                          ? Icons.check_circle_rounded
+                          : Icons.circle_outlined,
+                      key: ValueKey(selected),
+                      color: selected ? colors.tealStrong : colors.muted,
+                    ),
                   ),
-                ),
-              ],
+                ],
+              ),
             ),
           ),
         ),
@@ -1679,6 +1724,7 @@ class _SettingsSheetState extends State<_SettingsSheet> {
       listenable: controller,
       builder: (context, _) {
         final colors = context.wakeWallColors;
+        final titleColor = _wakeWallProminentTextColor(context);
         return Stack(
           children: [
             SingleChildScrollView(
@@ -1696,7 +1742,9 @@ class _SettingsSheetState extends State<_SettingsSheet> {
                     children: [
                       Text(
                         'Settings',
-                        style: Theme.of(context).textTheme.titleLarge,
+                        style: Theme.of(
+                          context,
+                        ).textTheme.titleLarge?.copyWith(color: titleColor),
                       ),
                       const Spacer(),
                       IconButton(
@@ -2116,6 +2164,7 @@ class _SegmentedSetting extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final colors = context.wakeWallColors;
+    final labelColor = _wakeWallProminentTextColor(context);
     return Container(
       padding: const EdgeInsets.all(14),
       decoration: BoxDecoration(
@@ -2129,7 +2178,12 @@ class _SegmentedSetting extends StatelessWidget {
             children: [
               Icon(icon, size: 19, color: colors.muted),
               const SizedBox(width: 10),
-              Text(label, style: Theme.of(context).textTheme.labelLarge),
+              Text(
+                label,
+                style: Theme.of(
+                  context,
+                ).textTheme.labelLarge?.copyWith(color: labelColor),
+              ),
             ],
           ),
           const SizedBox(height: 12),
@@ -2184,6 +2238,7 @@ class _SwitchTile extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final colors = context.wakeWallColors;
+    final labelColor = _wakeWallProminentTextColor(context);
     return Container(
       padding: const EdgeInsets.all(14),
       decoration: BoxDecoration(
@@ -2196,7 +2251,12 @@ class _SwitchTile extends StatelessWidget {
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                Text(label, style: Theme.of(context).textTheme.labelLarge),
+                Text(
+                  label,
+                  style: Theme.of(
+                    context,
+                  ).textTheme.labelLarge?.copyWith(color: labelColor),
+                ),
                 const SizedBox(height: 3),
                 Text(
                   description,
