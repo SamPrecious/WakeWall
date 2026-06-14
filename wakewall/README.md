@@ -50,8 +50,9 @@ cd android
 
 ```powershell
 flutter build apk --release
+Move-Item build/app/outputs/flutter-apk/app-release.apk build/app/outputs/flutter-apk/WakeWall.apk -Force
 ```
 
-Install `build/app/outputs/flutter-apk/app-release.apk` through Samsung My
+Install `build/app/outputs/flutter-apk/WakeWall.apk` through Samsung My
 Files. Release builds currently use the Android debug signing key; configure a
 permanent signing key before public distribution.

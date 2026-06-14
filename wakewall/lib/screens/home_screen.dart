@@ -15,6 +15,14 @@ import '../widgets/abstract_wallpaper.dart';
 const _noticeVisibleDuration = Duration(milliseconds: 2800);
 const _noticeFadeDuration = Duration(milliseconds: 180);
 
+void _wakeWallTapHaptic() {
+  HapticFeedback.selectionClick();
+}
+
+void _wakeWallCommitHaptic() {
+  HapticFeedback.mediumImpact();
+}
+
 // Shows every short app message with the same compact Android-style layout.
 ScaffoldFeatureController<SnackBar, SnackBarClosedReason> _showWakeWallNotice(
   BuildContext context, {
@@ -45,7 +53,10 @@ ScaffoldFeatureController<SnackBar, SnackBarClosedReason> _showWakeWallNotice(
           : SnackBarAction(
               label: actionLabel,
               textColor: WakeWallColors.tealStrong,
-              onPressed: onAction ?? () {},
+              onPressed: () {
+                _wakeWallTapHaptic();
+                (onAction ?? () {})();
+              },
             ),
     ),
     snackBarAnimationStyle: const AnimationStyle(
@@ -203,14 +214,22 @@ class _HomeScreenState extends State<HomeScreen> {
                                   onRemoveWallpaper: _removeWallpaper,
                                   onAdd: _addImages,
                                   onAlbums: _showCurrentWallpaperAlbums,
-                                  onResume: () =>
-                                      unawaited(controller.setPaused(false)),
-                                  onCrop: () => context.router.push(
-                                    CropEditorRoute(
-                                      controller: controller,
-                                      wallpaperIndex: controller.selectedIndex,
-                                    ),
-                                  ),
+                                  onResume: () {
+                                    _wakeWallTapHaptic();
+                                    unawaited(controller.setPaused(false));
+                                  },
+                                  onCrop: () {
+                                    _wakeWallTapHaptic();
+                                    unawaited(
+                                      context.router.push(
+                                        CropEditorRoute(
+                                          controller: controller,
+                                          wallpaperIndex:
+                                              controller.selectedIndex,
+                                        ),
+                                      ),
+                                    );
+                                  },
                                 ),
                               ),
                             ),
@@ -256,6 +275,7 @@ class _HomeScreenState extends State<HomeScreen> {
   }
 
   Future<void> _showSettings(BuildContext context) {
+    _wakeWallTapHaptic();
     unawaited(controller.refreshState());
     return showModalBottomSheet<void>(
       context: context,
@@ -266,6 +286,7 @@ class _HomeScreenState extends State<HomeScreen> {
   }
 
   Future<void> _showAlbums(BuildContext context) {
+    _wakeWallTapHaptic();
     return showModalBottomSheet<void>(
       context: context,
       isScrollControlled: true,
@@ -277,6 +298,7 @@ class _HomeScreenState extends State<HomeScreen> {
   Future<void> _showCurrentWallpaperAlbums() async {
     final wallpaper = controller.selectedWallpaper;
     if (wallpaper == null) return;
+    _wakeWallTapHaptic();
     await showModalBottomSheet<void>(
       context: context,
       isScrollControlled: true,
@@ -309,6 +331,7 @@ class _HomeScreenState extends State<HomeScreen> {
   }
 
   Future<void> _addImages() async {
+    _wakeWallTapHaptic();
     final wasEmpty = !controller.hasWallpapers;
     final existingIds = controller.wallpapers
         .map((wallpaper) => wallpaper.id)
@@ -412,11 +435,17 @@ Future<void> _offerWallpaperSetupIfNeeded(
       ),
       actions: [
         TextButton(
-          onPressed: () => Navigator.pop(context, false),
+          onPressed: () {
+            _wakeWallTapHaptic();
+            Navigator.pop(context, false);
+          },
           child: const Text('Not Now'),
         ),
         FilledButton(
-          onPressed: () => Navigator.pop(context, true),
+          onPressed: () {
+            _wakeWallCommitHaptic();
+            Navigator.pop(context, true);
+          },
           child: const Text('Set Wallpaper'),
         ),
       ],
@@ -714,7 +743,10 @@ class _Preview extends StatelessWidget {
                                   _OverlayButton(
                                     icon: Icons.shuffle_rounded,
                                     tooltip: 'Next Wallpaper',
-                                    onTap: controller.next,
+                                    onTap: () {
+                                      _wakeWallTapHaptic();
+                                      unawaited(controller.next());
+                                    },
                                   ),
                                 ],
                               ),
@@ -1203,12 +1235,18 @@ class _AlbumsSheetState extends State<_AlbumsSheet> {
               Text('Albums', style: Theme.of(context).textTheme.titleLarge),
               const Spacer(),
               IconButton(
-                onPressed: _createAlbum,
+                onPressed: () {
+                  _wakeWallTapHaptic();
+                  unawaited(_createAlbum());
+                },
                 tooltip: 'Create Album',
                 icon: const Icon(Icons.add_rounded),
               ),
               IconButton(
-                onPressed: () => Navigator.pop(context),
+                onPressed: () {
+                  _wakeWallTapHaptic();
+                  Navigator.pop(context);
+                },
                 tooltip: 'Close Albums',
                 icon: const Icon(Icons.close_rounded),
               ),
@@ -1282,12 +1320,18 @@ class _AlbumsSheetState extends State<_AlbumsSheet> {
             ListTile(
               leading: const Icon(Icons.edit_outlined),
               title: const Text('Rename'),
-              onTap: () => Navigator.pop(context, 'rename'),
+              onTap: () {
+                _wakeWallTapHaptic();
+                Navigator.pop(context, 'rename');
+              },
             ),
             ListTile(
               leading: const Icon(Icons.delete_outline_rounded),
               title: const Text('Delete Album'),
-              onTap: () => Navigator.pop(context, 'delete'),
+              onTap: () {
+                _wakeWallTapHaptic();
+                Navigator.pop(context, 'delete');
+              },
             ),
           ],
         ),
@@ -1313,11 +1357,17 @@ class _AlbumsSheetState extends State<_AlbumsSheet> {
           ),
           actions: [
             TextButton(
-              onPressed: () => Navigator.pop(context, false),
+              onPressed: () {
+                _wakeWallTapHaptic();
+                Navigator.pop(context, false);
+              },
               child: const Text('Album Only'),
             ),
             FilledButton(
-              onPressed: () => Navigator.pop(context, true),
+              onPressed: () {
+                _wakeWallCommitHaptic();
+                Navigator.pop(context, true);
+              },
               child: const Text('Album & Photos'),
             ),
           ],
@@ -1367,7 +1417,10 @@ class _AssignAlbumsSheetState extends State<_AssignAlbumsSheet> {
               Text('Albums', style: Theme.of(context).textTheme.titleLarge),
               const Spacer(),
               IconButton(
-                onPressed: _createAlbum,
+                onPressed: () {
+                  _wakeWallTapHaptic();
+                  unawaited(_createAlbum());
+                },
                 tooltip: 'Create Album',
                 icon: const Icon(Icons.add_rounded),
               ),
@@ -1379,18 +1432,24 @@ class _AssignAlbumsSheetState extends State<_AssignAlbumsSheet> {
               contentPadding: EdgeInsets.zero,
               title: const Text('No Album'),
               value: selected.isEmpty,
-              onChanged: (_) => setState(selected.clear),
+              onChanged: (_) {
+                _wakeWallTapHaptic();
+                setState(selected.clear);
+              },
             ),
           for (final album in widget.controller.albums)
             CheckboxListTile(
               contentPadding: EdgeInsets.zero,
               title: Text(album.name),
               value: selected.contains(album.id),
-              onChanged: (_) => setState(() {
-                selected.contains(album.id)
-                    ? selected.remove(album.id)
-                    : selected.add(album.id);
-              }),
+              onChanged: (_) {
+                _wakeWallTapHaptic();
+                setState(() {
+                  selected.contains(album.id)
+                      ? selected.remove(album.id)
+                      : selected.add(album.id);
+                });
+              },
             ),
           if (widget.controller.albums.isEmpty)
             Text(
@@ -1418,6 +1477,7 @@ class _AssignAlbumsSheetState extends State<_AssignAlbumsSheet> {
   }
 
   Future<void> _save() async {
+    _wakeWallCommitHaptic();
     for (final wallpaper in widget.wallpapers) {
       await widget.controller.updateWallpaperAlbums(wallpaper, selected);
     }
@@ -1466,8 +1526,16 @@ class _AlbumFilterTile extends StatelessWidget {
       child: Material(
         color: Colors.transparent,
         child: InkWell(
-          onTap: onTap,
-          onLongPress: onLongPress,
+          onTap: () {
+            _wakeWallTapHaptic();
+            onTap();
+          },
+          onLongPress: onLongPress == null
+              ? null
+              : () {
+                  _wakeWallCommitHaptic();
+                  onLongPress!();
+                },
           splashFactory: NoSplash.splashFactory,
           overlayColor: const WidgetStatePropertyAll(Colors.transparent),
           borderRadius: BorderRadius.circular(12),
@@ -1549,11 +1617,17 @@ Future<String?> _albumNameDialog(
       ),
       actions: [
         TextButton(
-          onPressed: () => Navigator.pop(context),
+          onPressed: () {
+            _wakeWallTapHaptic();
+            Navigator.pop(context);
+          },
           child: const Text('Cancel'),
         ),
         FilledButton(
-          onPressed: () => Navigator.pop(context, textController.text.trim()),
+          onPressed: () {
+            _wakeWallCommitHaptic();
+            Navigator.pop(context, textController.text.trim());
+          },
           child: const Text('Save'),
         ),
       ],
@@ -1606,7 +1680,10 @@ class _SettingsSheetState extends State<_SettingsSheet> {
                       ),
                       const Spacer(),
                       IconButton(
-                        onPressed: () => Navigator.pop(context),
+                        onPressed: () {
+                          _wakeWallTapHaptic();
+                          Navigator.pop(context);
+                        },
                         tooltip: 'Close Settings',
                         icon: const Icon(
                           Icons.close_rounded,
@@ -1669,7 +1746,10 @@ class _SettingsSheetState extends State<_SettingsSheet> {
                         child: OutlinedButton.icon(
                           onPressed: handlingBackup
                               ? null
-                              : () => _backup(false),
+                              : () {
+                                  _wakeWallTapHaptic();
+                                  unawaited(_backup(false));
+                                },
                           icon: const Icon(Icons.save_alt_rounded),
                           label: const Text('Backup'),
                         ),
@@ -1679,7 +1759,10 @@ class _SettingsSheetState extends State<_SettingsSheet> {
                         child: OutlinedButton.icon(
                           onPressed: handlingBackup
                               ? null
-                              : () => _backup(true),
+                              : () {
+                                  _wakeWallTapHaptic();
+                                  unawaited(_backup(true));
+                                },
                           icon: const Icon(Icons.restore_rounded),
                           label: const Text('Restore'),
                         ),
@@ -1690,7 +1773,10 @@ class _SettingsSheetState extends State<_SettingsSheet> {
                   FilledButton.icon(
                     onPressed: controller.wakeWallActive
                         ? null
-                        : controller.openWallpaperPicker,
+                        : () {
+                            _wakeWallTapHaptic();
+                            unawaited(controller.openWallpaperPicker());
+                          },
                     icon: Icon(
                       controller.wakeWallActive
                           ? Icons.check_circle_outline_rounded
@@ -1731,11 +1817,17 @@ class _SettingsSheetState extends State<_SettingsSheet> {
           ),
           actions: [
             TextButton(
-              onPressed: () => Navigator.pop(context, false),
+              onPressed: () {
+                _wakeWallTapHaptic();
+                Navigator.pop(context, false);
+              },
               child: const Text('Cancel'),
             ),
             FilledButton(
-              onPressed: () => Navigator.pop(context, true),
+              onPressed: () {
+                _wakeWallCommitHaptic();
+                Navigator.pop(context, true);
+              },
               child: const Text('Restore Backup'),
             ),
           ],
@@ -1804,11 +1896,17 @@ class _SettingsSheetState extends State<_SettingsSheet> {
         ),
         actions: [
           TextButton(
-            onPressed: () => Navigator.pop(context, false),
+            onPressed: () {
+              _wakeWallTapHaptic();
+              Navigator.pop(context, false);
+            },
             child: const Text('Cancel'),
           ),
           FilledButton(
-            onPressed: () => Navigator.pop(context, true),
+            onPressed: () {
+              _wakeWallCommitHaptic();
+              Navigator.pop(context, true);
+            },
             child: const Text('Enable'),
           ),
         ],
@@ -1863,7 +1961,7 @@ class _AddSourceSheetState extends State<_AddSourceSheet> {
           _SourceOption(
             icon: Icons.photo_library_outlined,
             title: 'Photos',
-            description: 'Use Android’s polished photo picker',
+            description: "Use Android's polished photo picker",
             badge: 'Recommended',
             onTap: () => _select(PhotoSource.photos),
           ),
@@ -1912,7 +2010,10 @@ class _SourceOption extends StatelessWidget {
       color: WakeWallColors.background,
       borderRadius: BorderRadius.circular(14),
       child: InkWell(
-        onTap: onTap,
+        onTap: () {
+          _wakeWallTapHaptic();
+          onTap();
+        },
         borderRadius: BorderRadius.circular(14),
         child: Padding(
           padding: const EdgeInsets.all(15),
@@ -2008,7 +2109,11 @@ class _SegmentedSetting extends StatelessWidget {
                   ButtonSegment(value: i, label: Text(options[i])),
               ],
               selected: {selectedIndex},
-              onSelectionChanged: (selection) => onSelected(selection.first),
+              onSelectionChanged: (selection) {
+                final next = selection.first;
+                if (next != selectedIndex) _wakeWallTapHaptic();
+                onSelected(next);
+              },
               showSelectedIcon: false,
               style: SegmentedButton.styleFrom(
                 selectedBackgroundColor: WakeWallColors.teal,
@@ -2062,7 +2167,13 @@ class _SwitchTile extends StatelessWidget {
               ],
             ),
           ),
-          Switch(value: value, onChanged: onChanged),
+          Switch(
+            value: value,
+            onChanged: (next) {
+              if (next != value) _wakeWallTapHaptic();
+              onChanged(next);
+            },
+          ),
         ],
       ),
     );
@@ -2089,7 +2200,10 @@ class _RememberChoiceTile extends StatelessWidget {
       title: Text(label),
       subtitle: Text(description),
       value: value,
-      onChanged: onChanged,
+      onChanged: (next) {
+        if (next != value) _wakeWallTapHaptic();
+        onChanged(next);
+      },
     );
   }
 }

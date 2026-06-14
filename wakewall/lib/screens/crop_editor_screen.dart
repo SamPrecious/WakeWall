@@ -2,11 +2,20 @@ import 'dart:math' as math;
 
 import 'package:auto_route/auto_route.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 
 import '../controllers/wakewall_controller.dart';
 import '../models/wallpaper.dart';
 import '../theme/wakewall_theme.dart';
 import '../widgets/abstract_wallpaper.dart';
+
+void _cropTapHaptic() {
+  HapticFeedback.selectionClick();
+}
+
+void _cropCommitHaptic() {
+  HapticFeedback.mediumImpact();
+}
 
 @RoutePage()
 class CropEditorScreen extends StatefulWidget {
@@ -57,7 +66,10 @@ class _CropEditorScreenState extends State<CropEditorScreen> {
           children: [
             _EditorHeader(
               saving: saving,
-              onCancel: () => context.router.pop(),
+              onCancel: () {
+                _cropTapHaptic();
+                context.router.pop();
+              },
               onSave: _save,
             ),
             Expanded(
@@ -192,10 +204,14 @@ class _CropEditorScreenState extends State<CropEditorScreen> {
               crop: crop,
               displayMode: displayMode,
               fitBackgroundColor: fitBackgroundColor,
-              onDisplayModeChanged: (value) =>
-                  setState(() => displayMode = value),
-              onFitBackgroundColorChanged: (value) =>
-                  setState(() => fitBackgroundColor = value),
+              onDisplayModeChanged: (value) {
+                if (value != displayMode) _cropTapHaptic();
+                setState(() => displayMode = value);
+              },
+              onFitBackgroundColorChanged: (value) {
+                if (value != fitBackgroundColor) _cropTapHaptic();
+                setState(() => fitBackgroundColor = value);
+              },
             ),
           ],
         ),
@@ -204,6 +220,7 @@ class _CropEditorScreenState extends State<CropEditorScreen> {
   }
 
   Future<void> _save() async {
+    _cropCommitHaptic();
     setState(() => saving = true);
     await widget.controller.updateCrop(
       widget.wallpaperIndex,
@@ -216,6 +233,7 @@ class _CropEditorScreenState extends State<CropEditorScreen> {
   }
 
   void _reset() {
+    _cropCommitHaptic();
     setState(() {
       crop = const WallpaperCrop();
       displayMode = WallpaperDisplayMode.fill;
