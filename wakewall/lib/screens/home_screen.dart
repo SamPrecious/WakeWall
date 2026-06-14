@@ -171,11 +171,7 @@ class _HomeScreenState extends State<HomeScreen> {
                           SizedBox(
                             height: headerHeight,
                             child: _Header(
-                              paused: controller.paused,
                               onAlbums: () => _showAlbums(context),
-                              onTogglePaused: () => unawaited(
-                                controller.setPaused(!controller.paused),
-                              ),
                               onSettings: () => _showSettings(context),
                             ),
                           ),
@@ -190,6 +186,8 @@ class _HomeScreenState extends State<HomeScreen> {
                                 onRemoveWallpaper: _removeWallpaper,
                                 onAdd: _addImages,
                                 onAlbums: _showCurrentWallpaperAlbums,
+                                onResume: () =>
+                                    unawaited(controller.setPaused(false)),
                                 onCrop: () => context.router.push(
                                   CropEditorRoute(
                                     controller: controller,
@@ -485,16 +483,9 @@ class _OperationOverlay extends StatelessWidget {
 }
 
 class _Header extends StatelessWidget {
-  const _Header({
-    required this.paused,
-    required this.onAlbums,
-    required this.onTogglePaused,
-    required this.onSettings,
-  });
+  const _Header({required this.onAlbums, required this.onSettings});
 
-  final bool paused;
   final VoidCallback onAlbums;
-  final VoidCallback onTogglePaused;
   final VoidCallback onSettings;
 
   @override
@@ -519,21 +510,10 @@ class _Header extends StatelessWidget {
         ),
         Positioned(
           right: 0,
-          child: Row(
-            children: [
-              _HeaderActionButton(
-                icon: paused ? Icons.pause_rounded : Icons.pause_outlined,
-                tooltip: paused ? 'Resume WakeWall' : 'Pause WakeWall',
-                selected: paused,
-                onTap: onTogglePaused,
-              ),
-              const SizedBox(width: 4),
-              _HeaderActionButton(
-                icon: Icons.settings_outlined,
-                tooltip: 'Settings',
-                onTap: onSettings,
-              ),
-            ],
+          child: _HeaderActionButton(
+            icon: Icons.settings_outlined,
+            tooltip: 'Settings',
+            onTap: onSettings,
           ),
         ),
         Positioned(
@@ -554,22 +534,18 @@ class _HeaderActionButton extends StatelessWidget {
     required this.icon,
     required this.tooltip,
     required this.onTap,
-    this.selected = false,
   });
 
   final IconData icon;
   final String tooltip;
   final VoidCallback onTap;
-  final bool selected;
 
   @override
   Widget build(BuildContext context) {
     return Tooltip(
       message: tooltip,
       child: Material(
-        color: selected
-            ? WakeWallColors.tealStrong.withValues(alpha: .16)
-            : Colors.transparent,
+        color: Colors.transparent,
         borderRadius: BorderRadius.circular(13),
         child: InkWell(
           onTap: onTap,
@@ -581,17 +557,9 @@ class _HeaderActionButton extends StatelessWidget {
             height: 40,
             decoration: BoxDecoration(
               borderRadius: BorderRadius.circular(13),
-              border: Border.all(
-                color: selected
-                    ? WakeWallColors.tealStrong.withValues(alpha: .55)
-                    : Colors.transparent,
-              ),
+              border: Border.all(color: Colors.transparent),
             ),
-            child: Icon(
-              icon,
-              color: selected ? WakeWallColors.tealStrong : WakeWallColors.teal,
-              size: selected ? 21 : 22,
-            ),
+            child: Icon(icon, color: WakeWallColors.teal, size: 22),
           ),
         ),
       ),
@@ -607,6 +575,7 @@ class _Preview extends StatelessWidget {
     required this.onRemoveWallpaper,
     required this.onAdd,
     required this.onAlbums,
+    required this.onResume,
     required this.onCrop,
   });
 
@@ -616,6 +585,7 @@ class _Preview extends StatelessWidget {
   final Future<void> Function(int) onRemoveWallpaper;
   final VoidCallback onAdd;
   final VoidCallback onAlbums;
+  final VoidCallback onResume;
   final VoidCallback onCrop;
 
   @override
@@ -680,6 +650,31 @@ class _Preview extends StatelessWidget {
                               previewBytes: previewBytes,
                               applyCrop: wallpaper.mainPreview == null,
                               borderRadius: radius,
+                            ),
+                          ),
+                          Positioned(
+                            left: 0,
+                            right: 0,
+                            top: 14,
+                            child: Center(
+                              child: AnimatedSwitcher(
+                                duration: const Duration(milliseconds: 240),
+                                reverseDuration: const Duration(
+                                  milliseconds: 180,
+                                ),
+                                switchInCurve: Curves.easeOut,
+                                switchOutCurve: Curves.easeIn,
+                                child: controller.paused
+                                    ? _PausedPreviewButton(
+                                        key: const ValueKey(
+                                          'paused-chip-visible',
+                                        ),
+                                        onTap: onResume,
+                                      )
+                                    : const SizedBox(
+                                        key: ValueKey('paused-chip-hidden'),
+                                      ),
+                              ),
                             ),
                           ),
                           Positioned(
@@ -764,6 +759,55 @@ class _Preview extends StatelessWidget {
             ),
           ),
         ],
+      ),
+    );
+  }
+}
+
+class _PausedPreviewButton extends StatelessWidget {
+  const _PausedPreviewButton({required this.onTap, super.key});
+
+  final VoidCallback onTap;
+
+  @override
+  Widget build(BuildContext context) {
+    return Tooltip(
+      message: 'Resume WakeWall',
+      child: Material(
+        color: const Color(0xCC25262A),
+        borderRadius: BorderRadius.circular(16),
+        child: InkWell(
+          onTap: onTap,
+          borderRadius: BorderRadius.circular(16),
+          child: AnimatedContainer(
+            duration: const Duration(milliseconds: 160),
+            curve: Curves.easeOut,
+            height: 34,
+            padding: const EdgeInsets.symmetric(horizontal: 12),
+            decoration: BoxDecoration(
+              borderRadius: BorderRadius.circular(16),
+              border: Border.all(color: Colors.white.withValues(alpha: .12)),
+            ),
+            child: Row(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                const Icon(
+                  Icons.pause_rounded,
+                  color: Color(0xFFE3E3E8),
+                  size: 16,
+                ),
+                const SizedBox(width: 6),
+                Text(
+                  'Paused',
+                  style: Theme.of(context).textTheme.labelLarge?.copyWith(
+                    color: const Color(0xFFE3E3E8),
+                    fontSize: 13,
+                  ),
+                ),
+              ],
+            ),
+          ),
+        ),
       ),
     );
   }

@@ -75,6 +75,10 @@ personalisation app, not a technical background utility.
   - adjust its crop and display mode;
   - manually show the next wallpaper.
 - The large-preview overlay actions are centered near the bottom of the preview.
+- When paused, a compact centred `Paused` overlay appears near the top of the
+  large preview and acts as a quick resume control. It uses high-contrast white
+  content on a charcoal translucent background so it remains readable over
+  bright wallpapers, and fades in and out like the crop reset overlay.
 
 ### Main Navigation
 
@@ -123,7 +127,7 @@ Important invariants:
 - `Shuffle` is the default.
 - `In Order` advances through the active collection sequentially.
 - Pause keeps the current wallpaper in place.
-- Pause can be toggled from Settings or from the compact header pause control.
+- Pause is enabled from Settings; the preview `Paused` control resumes WakeWall.
 - Manual next remains available while WakeWall is active.
 
 ## Albums
@@ -271,7 +275,7 @@ placed directly beside the feature it controls.
 - Bottom-sheet content must reserve the Android bottom safe area so rows and
   buttons never dip under gesture or 3-button navigation.
 - Avoid shifting major layout elements when contextual controls appear.
-- Paused state uses a small highlighted header control rather than a separate
+- Paused state uses a small high-contrast preview control rather than a separate
   banner or pill that changes the home layout height.
 - Interactive controls should acknowledge taps immediately. Selection borders,
   checkmarks, and lightweight visual state may update optimistically before
