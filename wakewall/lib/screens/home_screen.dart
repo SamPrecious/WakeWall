@@ -13,7 +13,7 @@ import '../theme/wakewall_theme.dart';
 import '../widgets/abstract_wallpaper.dart';
 
 const _noticeVisibleDuration = Duration(milliseconds: 2800);
-const _noticeFadeDuration = Duration(milliseconds: 200);
+const _noticeFadeDuration = Duration(milliseconds: 180);
 
 // Shows every short app message with the same compact Android-style layout.
 ScaffoldFeatureController<SnackBar, SnackBarClosedReason> _showWakeWallNotice(
@@ -49,6 +49,7 @@ ScaffoldFeatureController<SnackBar, SnackBarClosedReason> _showWakeWallNotice(
             ),
     ),
     snackBarAnimationStyle: const AnimationStyle(
+      duration: _noticeFadeDuration,
       reverseDuration: _noticeFadeDuration,
     ),
   );
@@ -136,20 +137,24 @@ class _HomeScreenState extends State<HomeScreen> {
                     final horizontalPadding = constraints.maxWidth < 420
                         ? 20.0
                         : 28.0;
-                    final headerHeight = compact ? 66.0 : 88.0;
+                    final headerHeight = compact
+                        ? controller.paused
+                              ? 82.0
+                              : 76.0
+                        : 88.0;
                     final bottomGap = compact ? 8.0 : 18.0;
                     final usableHeight =
                         constraints.maxHeight - headerHeight - bottomGap;
-                    final idealCollectionHeight = compact ? 112.0 : 148.0;
+                    final idealCollectionHeight = compact ? 132.0 : 148.0;
                     final minimumPreviewHeight = controller.hasWallpapers
                         ? 280.0
                         : 340.0;
                     final collectionHeight = controller.hasWallpapers
                         ? idealCollectionHeight
                               .clamp(
-                                compact ? 88.0 : 106.0,
+                                compact ? 124.0 : 106.0,
                                 math.max(
-                                  compact ? 88.0 : 106.0,
+                                  compact ? 124.0 : 106.0,
                                   usableHeight - minimumPreviewHeight,
                                 ),
                               )
@@ -599,15 +604,25 @@ class _Preview extends StatelessWidget {
                           .clamp(0, controller.wallpapers.length - 1)
                           .toInt();
                       final wallpaper = controller.wallpapers[boundedIndex];
+                      final previewBytes =
+                          wallpaper.mainPreview ?? wallpaper.preview;
                       return Stack(
                         fit: StackFit.expand,
                         children: [
-                          AbstractWallpaper(
-                            wallpaper: wallpaper,
-                            previewBytes:
-                                wallpaper.mainPreview ?? wallpaper.preview,
-                            applyCrop: wallpaper.mainPreview == null,
-                            borderRadius: radius,
+                          AnimatedSwitcher(
+                            duration: const Duration(milliseconds: 220),
+                            reverseDuration: const Duration(milliseconds: 160),
+                            switchInCurve: Curves.easeOut,
+                            switchOutCurve: Curves.easeIn,
+                            child: AbstractWallpaper(
+                              key: ValueKey(
+                                'preview-${wallpaper.id}-${identityHashCode(previewBytes)}',
+                              ),
+                              wallpaper: wallpaper,
+                              previewBytes: previewBytes,
+                              applyCrop: wallpaper.mainPreview == null,
+                              borderRadius: radius,
+                            ),
                           ),
                           Positioned(
                             right: 14,
@@ -881,7 +896,10 @@ class _WallpaperStripState extends State<_WallpaperStrip> {
                         .44,
                         .62,
                       );
-                      final tileHeight = constraints.maxHeight * .84;
+                      final tileHeight = math.min(
+                        constraints.maxHeight,
+                        math.max(72.0, constraints.maxHeight * .84),
+                      );
                       final tileWidth = constraints.maxHeight * phoneRatio;
                       final activeIndex =
                           optimisticSelectedIndex ?? selectedIndex;
@@ -894,7 +912,7 @@ class _WallpaperStripState extends State<_WallpaperStrip> {
                         ),
                         scrollDirection: Axis.horizontal,
                         itemCount: controller.wallpapers.length,
-                        separatorBuilder: (_, _) => const SizedBox(width: 10),
+                        separatorBuilder: (_, _) => const SizedBox(width: 8),
                         itemBuilder: (context, index) {
                           final selected = index == activeIndex;
                           final tile = _WallpaperTile(

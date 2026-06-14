@@ -260,9 +260,12 @@ placed directly beside the feature it controls.
 - Blue is the primary accent; avoid the earlier green-heavy utility aesthetic.
 - The large wallpaper preview should retain a realistic phone-like proportion.
 - `Up Next` thumbnails are portrait, compact, rounded, and may visually fall off
-  either edge while scrolling.
+  either edge while scrolling. Their horizontal gap should stay tight, currently
+  around 8 px.
 - The home layout should reserve `Up Next` space before sizing the main preview
   so 3-button navigation, gesture navigation, and display scaling behave alike.
+  Compact/button-navigation layouts should keep a usable minimum `Up Next`
+  height instead of letting the main preview consume the page.
 - Bottom-sheet content must reserve the Android bottom safe area so rows and
   buttons never dip under gesture or 3-button navigation.
 - Avoid shifting major layout elements when contextual controls appear.
@@ -271,6 +274,8 @@ placed directly beside the feature it controls.
   native sync or heavier preview work completes.
 - Selected-wallpaper changes should use the lightweight selected-index listener
   rather than forcing a full home-screen rebuild.
+- The large preview may use a short local fade when the selected wallpaper
+  changes, but overlay controls should stay stable.
 - Album filter taps keep sheet feedback local and debounce native filter sync so
   the checkmark animation is not competing with wallpaper-list refresh work.
 - Crop-editor header actions should keep stable positions.
@@ -286,8 +291,8 @@ placed directly beside the feature it controls.
 - Prefer friendly user language over implementation language.
 - Keep labels short where possible.
 - Avoid terms such as `sequential` in visible copy; use `In Order`.
-- Notifications use a consistent rounded floating style, fade out, and normally
-  disappear after approximately three seconds.
+- Notifications use a consistent rounded floating style, fade in and out, and
+  normally disappear after approximately three seconds.
 
 ## Architecture
 
