@@ -132,32 +132,29 @@ class _HomeScreenState extends State<HomeScreen> {
                     final bottomInset = MediaQuery.viewPaddingOf(
                       context,
                     ).bottom;
-                    final compact =
-                        constraints.maxHeight < 760 || bottomInset > 24;
                     final horizontalPadding = constraints.maxWidth < 420
                         ? 20.0
                         : 28.0;
-                    final headerHeight = compact
-                        ? controller.paused
-                              ? 82.0
-                              : 76.0
-                        : 88.0;
-                    final bottomGap = compact ? 8.0 : 18.0;
+                    final headerHeight = controller.paused ? 94.0 : 88.0;
+                    final bottomGap = bottomInset > 24 ? 10.0 : 18.0;
                     final usableHeight =
                         constraints.maxHeight - headerHeight - bottomGap;
-                    final idealCollectionHeight = compact ? 132.0 : 148.0;
                     final minimumPreviewHeight = controller.hasWallpapers
-                        ? 280.0
+                        ? 300.0
                         : 340.0;
+                    // Size the thumbnails themselves proportionally, then add the fixed label row.
+                    final targetTileHeight = (usableHeight * .113)
+                        .clamp(80.5, 89.7)
+                        .toDouble();
+                    final targetCollectionHeight =
+                        48.0 + targetTileHeight / .86;
+                    final maximumCollectionHeight = math.max(
+                      112.0,
+                      usableHeight - minimumPreviewHeight,
+                    );
                     final collectionHeight = controller.hasWallpapers
-                        ? idealCollectionHeight
-                              .clamp(
-                                compact ? 124.0 : 106.0,
-                                math.max(
-                                  compact ? 124.0 : 106.0,
-                                  usableHeight - minimumPreviewHeight,
-                                ),
-                              )
+                        ? targetCollectionHeight
+                              .clamp(112.0, maximumCollectionHeight)
                               .toDouble()
                         : 0.0;
                     // Reserve the collection first so navigation bars cannot squash it.
@@ -866,9 +863,10 @@ class _WallpaperStripState extends State<_WallpaperStrip> {
               children: [
                 Text(
                   'Up Next',
-                  style: Theme.of(
-                    context,
-                  ).textTheme.labelLarge?.copyWith(letterSpacing: 1.2),
+                  style: Theme.of(context).textTheme.labelLarge?.copyWith(
+                    fontSize: 15.5,
+                    letterSpacing: 1.2,
+                  ),
                 ),
                 const Spacer(),
                 TextButton.icon(
@@ -898,9 +896,9 @@ class _WallpaperStripState extends State<_WallpaperStrip> {
                       );
                       final tileHeight = math.min(
                         constraints.maxHeight,
-                        math.max(72.0, constraints.maxHeight * .84),
+                        math.max(89.7, constraints.maxHeight * .86),
                       );
-                      final tileWidth = constraints.maxHeight * phoneRatio;
+                      final tileWidth = tileHeight * phoneRatio;
                       final activeIndex =
                           optimisticSelectedIndex ?? selectedIndex;
 
@@ -912,7 +910,7 @@ class _WallpaperStripState extends State<_WallpaperStrip> {
                         ),
                         scrollDirection: Axis.horizontal,
                         itemCount: controller.wallpapers.length,
-                        separatorBuilder: (_, _) => const SizedBox(width: 8),
+                        separatorBuilder: (_, _) => const SizedBox(width: 5.9),
                         itemBuilder: (context, index) {
                           final selected = index == activeIndex;
                           final tile = _WallpaperTile(

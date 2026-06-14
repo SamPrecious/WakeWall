@@ -261,11 +261,11 @@ placed directly beside the feature it controls.
 - The large wallpaper preview should retain a realistic phone-like proportion.
 - `Up Next` thumbnails are portrait, compact, rounded, and may visually fall off
   either edge while scrolling. Their horizontal gap should stay tight, currently
-  around 8 px.
-- The home layout should reserve `Up Next` space before sizing the main preview
-  so 3-button navigation, gesture navigation, and display scaling behave alike.
-  Compact/button-navigation layouts should keep a usable minimum `Up Next`
-  height instead of letting the main preview consume the page.
+  around 6 px.
+- The home layout should reserve `Up Next` space before sizing the main preview.
+  Gesture navigation and 3-button navigation should use the same approximate
+  preview-to-strip ratio, with a minimum strip height so thumbnails remain
+  usable when Android reduces the safe screen height.
 - Bottom-sheet content must reserve the Android bottom safe area so rows and
   buttons never dip under gesture or 3-button navigation.
 - Avoid shifting major layout elements when contextual controls appear.
