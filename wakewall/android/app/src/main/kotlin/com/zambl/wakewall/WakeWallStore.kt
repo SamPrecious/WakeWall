@@ -75,6 +75,10 @@ class WakeWallStore(context: Context) {
         get() = prefs.getString("photo_source", "askEveryTime") ?: "askEveryTime"
         set(value) = prefs.edit().putString("photo_source", value).apply()
 
+    var themeMode: String
+        get() = normalizedThemeMode(prefs.getString("theme_mode", null) ?: THEME_MODE_SYSTEM)
+        set(value) = prefs.edit().putString("theme_mode", normalizedThemeMode(value)).apply()
+
     var askAlbumsAfterImport: Boolean
         get() = prefs.getBoolean("ask_albums_after_import", true)
         set(value) = prefs.edit().putBoolean("ask_albums_after_import", value).apply()
@@ -210,11 +214,18 @@ class WakeWallStore(context: Context) {
         saveDefaultImportAlbumIds(ids)
     }
 
-    fun updateSettings(paused: Boolean, shuffle: Boolean, fit: String, wallpaperScrolling: Boolean) {
+    fun updateSettings(
+        paused: Boolean,
+        shuffle: Boolean,
+        fit: String,
+        themeMode: String,
+        wallpaperScrolling: Boolean,
+    ) {
         prefs.edit()
             .putBoolean("paused", paused)
             .putBoolean("shuffle", shuffle)
             .putString("fit", fit)
+            .putString("theme_mode", normalizedThemeMode(themeMode))
             .putBoolean("wallpaper_scrolling", wallpaperScrolling)
             .apply()
     }
@@ -524,6 +535,9 @@ class WakeWallStore(context: Context) {
     private fun normalizedDisplayMode(value: String): String =
         value.takeIf { it in DISPLAY_MODES } ?: DISPLAY_MODE_FILL
 
+    private fun normalizedThemeMode(value: String): String =
+        value.takeIf { it in THEME_MODES } ?: THEME_MODE_SYSTEM
+
     fun fitBackgroundColor(index: Int): Int =
         wallpaperAt(index)?.let(::fitBackgroundColor) ?: DEFAULT_FIT_BACKGROUND_COLOR
 
@@ -549,6 +563,7 @@ class WakeWallStore(context: Context) {
             "fit" to fit,
             "wallpaperScrolling" to wallpaperScrolling,
             "photoSource" to photoSource,
+            "themeMode" to themeMode,
             "albums" to albums.map(WallpaperAlbum::asMap),
             "activeAlbumIds" to activeAlbumIds.toList(),
             "askAlbumsAfterImport" to askAlbumsAfterImport,
@@ -606,6 +621,7 @@ class WakeWallStore(context: Context) {
                 .put("fit", fit)
                 .put("wallpaperScrolling", wallpaperScrolling)
                 .put("photoSource", photoSource)
+                .put("themeMode", themeMode)
                 .put("albums", JSONArray(albums.map { JSONObject(it.asMap()) }))
                 .put("activeAlbumIds", JSONArray(activeAlbumIds.toList()))
                 .put("askAlbumsAfterImport", askAlbumsAfterImport)
@@ -719,6 +735,7 @@ class WakeWallStore(context: Context) {
                 .putString("fit", manifest.optString("fit", "cropToFill"))
                 .putBoolean("wallpaper_scrolling", manifest.optBoolean("wallpaperScrolling", false))
                 .putString("photo_source", manifest.optString("photoSource", "askEveryTime"))
+                .putString("theme_mode", normalizedThemeMode(manifest.optString("themeMode", THEME_MODE_SYSTEM)))
                 .putString("albums", JSONArray(restoredAlbums.map { JSONObject(it.asMap()) }).toString())
                 .putString("active_album_ids", JSONArray(restoredActiveAlbums.toList()).toString())
                 .putBoolean("ask_albums_after_import", manifest.optBoolean("askAlbumsAfterImport", true))
@@ -1588,6 +1605,8 @@ class WakeWallStore(context: Context) {
         private const val DISPLAY_MODE_BLUR = "blur"
         private const val DEFAULT_FIT_BACKGROUND_COLOR = 0xFF202124.toInt()
         private val DISPLAY_MODES = setOf(DISPLAY_MODE_FILL, DISPLAY_MODE_FIT, DISPLAY_MODE_BLUR)
+        private const val THEME_MODE_SYSTEM = "system"
+        private val THEME_MODES = setOf(THEME_MODE_SYSTEM, "light", "dark")
         const val REMOVAL_UNDO_WINDOW_MS = 3_000L
     }
 }

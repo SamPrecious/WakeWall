@@ -2,6 +2,7 @@ import 'package:auto_route/auto_route.dart';
 import 'package:flutter/material.dart';
 
 import 'controllers/wakewall_controller.dart';
+import 'models/wallpaper.dart';
 import 'navigation/app_router.dart';
 import 'theme/wakewall_theme.dart';
 
@@ -44,14 +45,25 @@ class _WakeWallAppState extends State<WakeWallApp> with WidgetsBindingObserver {
 
   @override
   Widget build(BuildContext context) {
-    return MaterialApp.router(
-      title: 'WakeWall',
-      debugShowCheckedModeBanner: false,
-      themeMode: ThemeMode.dark,
-      darkTheme: WakeWallTheme.dark,
-      routerConfig: router.config(
-        deepLinkBuilder: (_) => DeepLink([HomeRoute(controller: controller)]),
-      ),
+    return ListenableBuilder(
+      listenable: controller,
+      builder: (context, _) {
+        return MaterialApp.router(
+          title: 'WakeWall',
+          debugShowCheckedModeBanner: false,
+          themeMode: switch (controller.themeMode) {
+            WakeWallThemeMode.system => ThemeMode.system,
+            WakeWallThemeMode.light => ThemeMode.light,
+            WakeWallThemeMode.dark => ThemeMode.dark,
+          },
+          theme: WakeWallTheme.light,
+          darkTheme: WakeWallTheme.dark,
+          routerConfig: router.config(
+            deepLinkBuilder: (_) =>
+                DeepLink([HomeRoute(controller: controller)]),
+          ),
+        );
+      },
     );
   }
 }

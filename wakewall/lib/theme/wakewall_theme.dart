@@ -1,5 +1,76 @@
 import 'package:flutter/material.dart';
 
+@immutable
+class WakeWallPalette extends ThemeExtension<WakeWallPalette> {
+  const WakeWallPalette({
+    required this.background,
+    required this.surface,
+    required this.raisedSurface,
+    required this.outline,
+    required this.muted,
+    required this.teal,
+    required this.tealStrong,
+    required this.ink,
+    required this.danger,
+    required this.onSurface,
+  });
+
+  final Color background;
+  final Color surface;
+  final Color raisedSurface;
+  final Color outline;
+  final Color muted;
+  final Color teal;
+  final Color tealStrong;
+  final Color ink;
+  final Color danger;
+  final Color onSurface;
+
+  @override
+  WakeWallPalette copyWith({
+    Color? background,
+    Color? surface,
+    Color? raisedSurface,
+    Color? outline,
+    Color? muted,
+    Color? teal,
+    Color? tealStrong,
+    Color? ink,
+    Color? danger,
+    Color? onSurface,
+  }) {
+    return WakeWallPalette(
+      background: background ?? this.background,
+      surface: surface ?? this.surface,
+      raisedSurface: raisedSurface ?? this.raisedSurface,
+      outline: outline ?? this.outline,
+      muted: muted ?? this.muted,
+      teal: teal ?? this.teal,
+      tealStrong: tealStrong ?? this.tealStrong,
+      ink: ink ?? this.ink,
+      danger: danger ?? this.danger,
+      onSurface: onSurface ?? this.onSurface,
+    );
+  }
+
+  @override
+  WakeWallPalette lerp(ThemeExtension<WakeWallPalette>? other, double t) {
+    if (other is! WakeWallPalette) return this;
+    return WakeWallPalette(
+      background: Color.lerp(background, other.background, t)!,
+      surface: Color.lerp(surface, other.surface, t)!,
+      raisedSurface: Color.lerp(raisedSurface, other.raisedSurface, t)!,
+      outline: Color.lerp(outline, other.outline, t)!,
+      muted: Color.lerp(muted, other.muted, t)!,
+      teal: Color.lerp(teal, other.teal, t)!,
+      tealStrong: Color.lerp(tealStrong, other.tealStrong, t)!,
+      ink: Color.lerp(ink, other.ink, t)!,
+      danger: Color.lerp(danger, other.danger, t)!,
+      onSurface: Color.lerp(onSurface, other.onSurface, t)!,
+    );
+  }
+}
+
 abstract final class WakeWallColors {
   static const background = Color(0xFF101114);
   static const surface = Color(0xFF1B1C20);
@@ -10,26 +81,77 @@ abstract final class WakeWallColors {
   static const tealStrong = Color(0xFF8AB4F8);
   static const ink = Color(0xFF10213A);
   static const danger = Color(0xFFF2B8B5);
+  static const onSurface = Color(0xFFE3E3E8);
+
+  static const dark = WakeWallPalette(
+    background: background,
+    surface: surface,
+    raisedSurface: raisedSurface,
+    outline: outline,
+    muted: muted,
+    teal: teal,
+    tealStrong: tealStrong,
+    ink: ink,
+    danger: danger,
+    onSurface: onSurface,
+  );
+
+  static const light = WakeWallPalette(
+    background: Color(0xFFF8FAFD),
+    surface: Color(0xFFFFFFFF),
+    raisedSurface: Color(0xFFEFF3F8),
+    outline: Color(0xFFD9DEE7),
+    muted: Color(0xFF5F6368),
+    teal: Color(0xFF0B57D0),
+    tealStrong: Color(0xFF0B57D0),
+    ink: Color(0xFFFFFFFF),
+    danger: Color(0xFFB3261E),
+    onSurface: Color(0xFF202124),
+  );
+}
+
+extension WakeWallPaletteContext on BuildContext {
+  WakeWallPalette get wakeWallColors =>
+      Theme.of(this).extension<WakeWallPalette>() ?? WakeWallColors.dark;
 }
 
 abstract final class WakeWallTheme {
-  static ThemeData get dark {
-    const scheme = ColorScheme.dark(
-      primary: WakeWallColors.teal,
-      onPrimary: WakeWallColors.ink,
-      surface: WakeWallColors.surface,
-      onSurface: Color(0xFFE3E3E8),
-      outline: WakeWallColors.outline,
-      error: WakeWallColors.danger,
-    );
+  static ThemeData get dark =>
+      _build(brightness: Brightness.dark, colors: WakeWallColors.dark);
+
+  static ThemeData get light =>
+      _build(brightness: Brightness.light, colors: WakeWallColors.light);
+
+  static ThemeData _build({
+    required Brightness brightness,
+    required WakeWallPalette colors,
+  }) {
+    final scheme = brightness == Brightness.dark
+        ? ColorScheme.dark(
+            primary: colors.teal,
+            onPrimary: colors.ink,
+            surface: colors.surface,
+            onSurface: colors.onSurface,
+            outline: colors.outline,
+            error: colors.danger,
+          )
+        : ColorScheme.light(
+            primary: colors.teal,
+            onPrimary: colors.ink,
+            surface: colors.surface,
+            onSurface: colors.onSurface,
+            outline: colors.outline,
+            error: colors.danger,
+          );
 
     return ThemeData(
-      brightness: Brightness.dark,
+      brightness: brightness,
       colorScheme: scheme,
-      scaffoldBackgroundColor: WakeWallColors.background,
+      scaffoldBackgroundColor: colors.background,
       fontFamily: 'sans-serif',
       splashFactory: InkSparkle.splashFactory,
-      textTheme: const TextTheme(
+      extensions: [colors],
+      textTheme: TextTheme(
         displaySmall: TextStyle(
           fontSize: 38,
           height: 1,
@@ -46,29 +168,29 @@ abstract final class WakeWallTheme {
           letterSpacing: .2,
         ),
       ),
-      iconTheme: const IconThemeData(color: WakeWallColors.teal, size: 23),
-      bottomSheetTheme: const BottomSheetThemeData(
-        backgroundColor: WakeWallColors.surface,
-        modalBackgroundColor: WakeWallColors.surface,
+      iconTheme: IconThemeData(color: colors.teal, size: 23),
+      bottomSheetTheme: BottomSheetThemeData(
+        backgroundColor: colors.surface,
+        modalBackgroundColor: colors.surface,
         showDragHandle: true,
-        dragHandleColor: WakeWallColors.outline,
+        dragHandleColor: colors.outline,
       ),
       snackBarTheme: SnackBarThemeData(
         behavior: SnackBarBehavior.floating,
-        backgroundColor: WakeWallColors.raisedSurface,
+        backgroundColor: colors.raisedSurface,
         elevation: 8,
         insetPadding: const EdgeInsets.fromLTRB(20, 0, 20, 20),
         shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(18)),
-        contentTextStyle: const TextStyle(
-          color: Color(0xFFE3E3E8),
+        contentTextStyle: TextStyle(
+          color: colors.onSurface,
           fontSize: 14,
           fontWeight: FontWeight.w600,
         ),
       ),
       filledButtonTheme: FilledButtonThemeData(
         style: FilledButton.styleFrom(
-          backgroundColor: WakeWallColors.teal,
-          foregroundColor: WakeWallColors.ink,
+          backgroundColor: colors.teal,
+          foregroundColor: colors.ink,
           minimumSize: const Size(0, 48),
           shape: RoundedRectangleBorder(
             borderRadius: BorderRadius.circular(10),
@@ -80,14 +202,14 @@ abstract final class WakeWallTheme {
         style: OutlinedButton.styleFrom(
           foregroundColor: scheme.onSurface,
           minimumSize: const Size(0, 48),
-          side: const BorderSide(color: WakeWallColors.outline),
+          side: BorderSide(color: colors.outline),
           shape: RoundedRectangleBorder(
             borderRadius: BorderRadius.circular(10),
           ),
           textStyle: const TextStyle(fontSize: 15, fontWeight: FontWeight.w700),
         ),
       ),
-      dividerColor: WakeWallColors.outline,
+      dividerColor: colors.outline,
     );
   }
 }

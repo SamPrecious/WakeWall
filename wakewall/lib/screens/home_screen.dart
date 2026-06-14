@@ -28,10 +28,11 @@ ScaffoldFeatureController<SnackBar, SnackBarClosedReason> _showWakeWallNotice(
   BuildContext context, {
   required String message,
   required IconData icon,
-  Color iconColor = WakeWallColors.muted,
+  Color? iconColor,
   String? actionLabel,
   VoidCallback? onAction,
 }) {
+  final colors = context.wakeWallColors;
   final messenger = ScaffoldMessenger.of(context);
   messenger.hideCurrentSnackBar();
   final notice = messenger.showSnackBar(
@@ -43,7 +44,7 @@ ScaffoldFeatureController<SnackBar, SnackBarClosedReason> _showWakeWallNotice(
       shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(26)),
       content: Row(
         children: [
-          Icon(icon, color: iconColor, size: 22),
+          Icon(icon, color: iconColor ?? colors.muted, size: 22),
           const SizedBox(width: 12),
           Expanded(child: Text(message)),
         ],
@@ -52,7 +53,7 @@ ScaffoldFeatureController<SnackBar, SnackBarClosedReason> _showWakeWallNotice(
           ? null
           : SnackBarAction(
               label: actionLabel,
-              textColor: WakeWallColors.tealStrong,
+              textColor: colors.tealStrong,
               onPressed: () {
                 _wakeWallTapHaptic();
                 (onAction ?? () {})();
@@ -381,7 +382,7 @@ class _HomeScreenState extends State<HomeScreen> {
         context,
         message: controller.lastNativeError!,
         icon: Icons.error_outline_rounded,
-        iconColor: WakeWallColors.danger,
+        iconColor: context.wakeWallColors.danger,
         actionLabel: 'Dismiss',
         onAction: () {},
       );
@@ -424,10 +425,11 @@ Future<void> _offerWallpaperSetupIfNeeded(
   WakeWallController controller,
 ) async {
   if (!await controller.claimWallpaperSetupOffer() || !context.mounted) return;
+  final colors = context.wakeWallColors;
   final openSetup = await showDialog<bool>(
     context: context,
     builder: (context) => AlertDialog(
-      backgroundColor: WakeWallColors.surface,
+      backgroundColor: colors.surface,
       icon: const Icon(Icons.wallpaper_rounded),
       title: const Text('Set Up WakeWall?'),
       content: const Text(
@@ -469,6 +471,7 @@ class _OperationOverlay extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final colors = context.wakeWallColors;
     return Positioned.fill(
       key: overlayKey,
       child: Semantics(
@@ -484,10 +487,10 @@ class _OperationOverlay extends StatelessWidget {
                 margin: const EdgeInsets.symmetric(horizontal: 32),
                 padding: const EdgeInsets.fromLTRB(28, 26, 28, 24),
                 decoration: BoxDecoration(
-                  color: WakeWallColors.surface,
+                  color: colors.surface,
                   borderRadius: BorderRadius.circular(20),
                   border: Border.all(
-                    color: WakeWallColors.outline.withValues(alpha: .45),
+                    color: colors.outline.withValues(alpha: .45),
                   ),
                   boxShadow: const [
                     BoxShadow(
@@ -500,12 +503,12 @@ class _OperationOverlay extends StatelessWidget {
                 child: Column(
                   mainAxisSize: MainAxisSize.min,
                   children: [
-                    const SizedBox(
+                    SizedBox(
                       width: 38,
                       height: 38,
                       child: CircularProgressIndicator(
                         strokeWidth: 3,
-                        color: WakeWallColors.tealStrong,
+                        color: colors.tealStrong,
                       ),
                     ),
                     const SizedBox(height: 20),
@@ -518,9 +521,9 @@ class _OperationOverlay extends StatelessWidget {
                     Text(
                       description,
                       textAlign: TextAlign.center,
-                      style: Theme.of(context).textTheme.bodyMedium?.copyWith(
-                        color: WakeWallColors.muted,
-                      ),
+                      style: Theme.of(
+                        context,
+                      ).textTheme.bodyMedium?.copyWith(color: colors.muted),
                     ),
                   ],
                 ),
@@ -541,6 +544,7 @@ class _Header extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final colors = context.wakeWallColors;
     return Stack(
       alignment: Alignment.center,
       children: [
@@ -554,7 +558,7 @@ class _Header extends StatelessWidget {
                 'WakeWall',
                 style: Theme.of(
                   context,
-                ).textTheme.displaySmall?.copyWith(color: Colors.white),
+                ).textTheme.displaySmall?.copyWith(color: colors.onSurface),
               ),
             ),
           ),
@@ -593,6 +597,7 @@ class _HeaderActionButton extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final colors = context.wakeWallColors;
     return Tooltip(
       message: tooltip,
       child: Material(
@@ -610,7 +615,7 @@ class _HeaderActionButton extends StatelessWidget {
               borderRadius: BorderRadius.circular(13),
               border: Border.all(color: Colors.transparent),
             ),
-            child: Icon(icon, color: WakeWallColors.teal, size: 22),
+            child: Icon(icon, color: colors.teal, size: 22),
           ),
         ),
       ),
@@ -641,6 +646,7 @@ class _Preview extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final colors = context.wakeWallColors;
     final screen = MediaQuery.sizeOf(context);
     final phoneRatio = (screen.width / screen.height).clamp(.44, .62);
     final availableWidth = MediaQuery.sizeOf(context).width - 40;
@@ -655,12 +661,12 @@ class _Preview extends StatelessWidget {
       width: width,
       height: height,
       decoration: BoxDecoration(
-        color: WakeWallColors.background,
+        color: colors.background,
         borderRadius: radius,
         border: Border.all(
           color: controller.hasWallpapers
-              ? WakeWallColors.outline.withValues(alpha: .25)
-              : WakeWallColors.outline,
+              ? colors.outline.withValues(alpha: .25)
+              : colors.outline,
         ),
       ),
       clipBehavior: Clip.antiAlias,
@@ -785,16 +791,14 @@ class _Preview extends StatelessWidget {
                           height: removing ? 96 : 82,
                           decoration: BoxDecoration(
                             color: removing
-                                ? WakeWallColors.danger
-                                : WakeWallColors.raisedSurface,
+                                ? colors.danger
+                                : colors.raisedSurface,
                             shape: BoxShape.circle,
                           ),
                           child: Icon(
                             Icons.delete_outline_rounded,
                             size: removing ? 42 : 36,
-                            color: removing
-                                ? WakeWallColors.ink
-                                : WakeWallColors.muted,
+                            color: removing ? colors.ink : colors.muted,
                           ),
                         ),
                       );
@@ -866,6 +870,7 @@ class _EmptyPreview extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final colors = context.wakeWallColors;
     return Material(
       color: Colors.transparent,
       child: Semantics(
@@ -880,7 +885,7 @@ class _EmptyPreview extends StatelessWidget {
             child: Text(
               'Add Wallpapers',
               style: Theme.of(context).textTheme.displaySmall?.copyWith(
-                color: Colors.white,
+                color: colors.onSurface,
                 fontSize: 24,
                 letterSpacing: -.6,
               ),
@@ -1007,6 +1012,7 @@ class _WallpaperStripState extends State<_WallpaperStrip> {
 
   @override
   Widget build(BuildContext context) {
+    final colors = context.wakeWallColors;
     return ValueListenableBuilder<int>(
       valueListenable: controller.selectedIndexListenable,
       builder: (context, selectedIndex, _) {
@@ -1029,7 +1035,7 @@ class _WallpaperStripState extends State<_WallpaperStrip> {
                   icon: const Icon(Icons.add_rounded, size: 19),
                   label: const Text('ADD'),
                   style: TextButton.styleFrom(
-                    foregroundColor: WakeWallColors.tealStrong,
+                    foregroundColor: colors.tealStrong,
                     padding: const EdgeInsets.symmetric(horizontal: 0),
                   ),
                 ),
@@ -1165,6 +1171,7 @@ class _WallpaperTile extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final colors = context.wakeWallColors;
     return AnimatedContainer(
       key: ValueKey('wallpaper-thumbnail-${wallpaper.id}'),
       duration: selected ? Duration.zero : const Duration(milliseconds: 70),
@@ -1173,11 +1180,11 @@ class _WallpaperTile extends StatelessWidget {
       padding: const EdgeInsets.all(2.5),
       decoration: BoxDecoration(
         color: selected
-            ? WakeWallColors.tealStrong.withValues(alpha: .12)
+            ? colors.tealStrong.withValues(alpha: .12)
             : Colors.transparent,
         borderRadius: BorderRadius.circular(13),
         border: Border.all(
-          color: selected ? WakeWallColors.tealStrong : Colors.transparent,
+          color: selected ? colors.tealStrong : Colors.transparent,
           width: 1,
         ),
       ),
@@ -1224,6 +1231,7 @@ class _AlbumsSheetState extends State<_AlbumsSheet> {
 
   @override
   Widget build(BuildContext context) {
+    final colors = context.wakeWallColors;
     return SingleChildScrollView(
       padding: _bottomSheetPadding(context, left: 20, top: 6, right: 20),
       child: Column(
@@ -1274,7 +1282,7 @@ class _AlbumsSheetState extends State<_AlbumsSheet> {
               textAlign: TextAlign.center,
               style: Theme.of(
                 context,
-              ).textTheme.bodyMedium?.copyWith(color: WakeWallColors.muted),
+              ).textTheme.bodyMedium?.copyWith(color: colors.muted),
             ),
           ],
         ],
@@ -1406,6 +1414,7 @@ class _AssignAlbumsSheetState extends State<_AssignAlbumsSheet> {
 
   @override
   Widget build(BuildContext context) {
+    final colors = context.wakeWallColors;
     return SingleChildScrollView(
       padding: _bottomSheetPadding(context, left: 20, top: 6, right: 20),
       child: Column(
@@ -1458,7 +1467,7 @@ class _AssignAlbumsSheetState extends State<_AssignAlbumsSheet> {
                   : 'No albums yet.',
               style: Theme.of(
                 context,
-              ).textTheme.bodyMedium?.copyWith(color: WakeWallColors.muted),
+              ).textTheme.bodyMedium?.copyWith(color: colors.muted),
             ),
           if (widget.isImport) ...[
             const SizedBox(height: 10),
@@ -1520,6 +1529,7 @@ class _AlbumFilterTile extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final colors = context.wakeWallColors;
     return Semantics(
       button: true,
       selected: selected,
@@ -1560,9 +1570,7 @@ class _AlbumFilterTile extends StatelessWidget {
                         ? Icons.check_circle_rounded
                         : Icons.circle_outlined,
                     key: ValueKey(selected),
-                    color: selected
-                        ? WakeWallColors.tealStrong
-                        : WakeWallColors.muted,
+                    color: selected ? colors.tealStrong : colors.muted,
                   ),
                 ),
               ],
@@ -1602,11 +1610,12 @@ Future<String?> _albumNameDialog(
   required String title,
   String initialValue = '',
 }) async {
+  final colors = context.wakeWallColors;
   final textController = TextEditingController(text: initialValue);
   final result = await showDialog<String>(
     context: context,
     builder: (context) => AlertDialog(
-      backgroundColor: WakeWallColors.surface,
+      backgroundColor: colors.surface,
       title: Text(title),
       content: TextField(
         controller: textController,
@@ -1659,6 +1668,7 @@ class _SettingsSheetState extends State<_SettingsSheet> {
     return ListenableBuilder(
       listenable: controller,
       builder: (context, _) {
+        final colors = context.wakeWallColors;
         return Stack(
           children: [
             SingleChildScrollView(
@@ -1685,9 +1695,9 @@ class _SettingsSheetState extends State<_SettingsSheet> {
                           Navigator.pop(context);
                         },
                         tooltip: 'Close Settings',
-                        icon: const Icon(
+                        icon: Icon(
                           Icons.close_rounded,
-                          color: Color(0xFFE3E3E8),
+                          color: colors.onSurface,
                         ),
                       ),
                     ],
@@ -1731,6 +1741,16 @@ class _SettingsSheetState extends State<_SettingsSheet> {
                     description: 'Keep the current wallpaper in place',
                     value: controller.paused,
                     onChanged: controller.setPaused,
+                  ),
+                  const SizedBox(height: 10),
+                  _SegmentedSetting(
+                    label: 'Theme',
+                    icon: Icons.brightness_auto_outlined,
+                    options: const ['System', 'Light', 'Dark'],
+                    selectedIndex: controller.themeMode.index,
+                    onSelected: (index) => controller.setThemeMode(
+                      WakeWallThemeMode.values[index],
+                    ),
                   ),
                   const SizedBox(height: 10),
                   _SwitchTile(
@@ -1807,10 +1827,11 @@ class _SettingsSheetState extends State<_SettingsSheet> {
 
   Future<void> _backup(bool restore) async {
     if (restore && controller.wallpapers.length > 1) {
+      final colors = context.wakeWallColors;
       final confirmed = await showDialog<bool>(
         context: context,
         builder: (context) => AlertDialog(
-          backgroundColor: WakeWallColors.surface,
+          backgroundColor: colors.surface,
           title: const Text('Replace Current Setup?'),
           content: const Text(
             'Restoring a backup will replace your current wallpapers, order, crops, and settings.',
@@ -1869,8 +1890,8 @@ class _SettingsSheetState extends State<_SettingsSheet> {
             ? Icons.check_circle_outline_rounded
             : Icons.error_outline_rounded,
         iconColor: controller.lastNativeError == null
-            ? WakeWallColors.tealStrong
-            : WakeWallColors.danger,
+            ? context.wakeWallColors.tealStrong
+            : context.wakeWallColors.danger,
       );
     }
     if (restore &&
@@ -1886,10 +1907,11 @@ class _SettingsSheetState extends State<_SettingsSheet> {
       await controller.setWallpaperScrolling(false);
       return;
     }
+    final colors = context.wakeWallColors;
     final confirmed = await showDialog<bool>(
       context: context,
       builder: (context) => AlertDialog(
-        backgroundColor: WakeWallColors.surface,
+        backgroundColor: colors.surface,
         title: const Text('Enable Wallpaper Scrolling?'),
         content: const Text(
           'WakeWall will prepare wider wallpaper copies. This uses more storage and may reduce performance on some devices.',
@@ -1943,6 +1965,7 @@ class _AddSourceSheetState extends State<_AddSourceSheet> {
 
   @override
   Widget build(BuildContext context) {
+    final colors = context.wakeWallColors;
     return SingleChildScrollView(
       padding: const EdgeInsets.fromLTRB(20, 6, 20, 24),
       child: Column(
@@ -1955,7 +1978,7 @@ class _AddSourceSheetState extends State<_AddSourceSheet> {
             'Choose where WakeWall should look.',
             style: Theme.of(
               context,
-            ).textTheme.bodyMedium?.copyWith(color: WakeWallColors.muted),
+            ).textTheme.bodyMedium?.copyWith(color: colors.muted),
           ),
           const SizedBox(height: 18),
           _SourceOption(
@@ -2006,8 +2029,9 @@ class _SourceOption extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final colors = context.wakeWallColors;
     return Material(
-      color: WakeWallColors.background,
+      color: colors.background,
       borderRadius: BorderRadius.circular(14),
       child: InkWell(
         onTap: () {
@@ -2023,10 +2047,10 @@ class _SourceOption extends StatelessWidget {
                 width: 44,
                 height: 44,
                 decoration: BoxDecoration(
-                  color: WakeWallColors.raisedSurface,
+                  color: colors.raisedSurface,
                   borderRadius: BorderRadius.circular(12),
                 ),
-                child: Icon(icon, color: WakeWallColors.tealStrong),
+                child: Icon(icon, color: colors.tealStrong),
               ),
               const SizedBox(width: 14),
               Expanded(
@@ -2048,17 +2072,14 @@ class _SourceOption extends StatelessWidget {
                     const SizedBox(height: 3),
                     Text(
                       description,
-                      style: Theme.of(context).textTheme.bodySmall?.copyWith(
-                        color: WakeWallColors.muted,
-                      ),
+                      style: Theme.of(
+                        context,
+                      ).textTheme.bodySmall?.copyWith(color: colors.muted),
                     ),
                   ],
                 ),
               ),
-              const Icon(
-                Icons.chevron_right_rounded,
-                color: WakeWallColors.muted,
-              ),
+              Icon(Icons.chevron_right_rounded, color: colors.muted),
             ],
           ),
         ),
@@ -2084,10 +2105,11 @@ class _SegmentedSetting extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final colors = context.wakeWallColors;
     return Container(
       padding: const EdgeInsets.all(14),
       decoration: BoxDecoration(
-        color: WakeWallColors.background,
+        color: colors.background,
         borderRadius: BorderRadius.circular(10),
       ),
       child: Column(
@@ -2095,7 +2117,7 @@ class _SegmentedSetting extends StatelessWidget {
         children: [
           Row(
             children: [
-              Icon(icon, size: 19, color: WakeWallColors.muted),
+              Icon(icon, size: 19, color: colors.muted),
               const SizedBox(width: 10),
               Text(label, style: Theme.of(context).textTheme.labelLarge),
             ],
@@ -2116,10 +2138,10 @@ class _SegmentedSetting extends StatelessWidget {
               },
               showSelectedIcon: false,
               style: SegmentedButton.styleFrom(
-                selectedBackgroundColor: WakeWallColors.teal,
-                selectedForegroundColor: WakeWallColors.ink,
-                backgroundColor: WakeWallColors.raisedSurface,
-                foregroundColor: WakeWallColors.muted,
+                selectedBackgroundColor: colors.teal,
+                selectedForegroundColor: colors.ink,
+                backgroundColor: colors.raisedSurface,
+                foregroundColor: colors.muted,
               ),
             ),
           ),
@@ -2144,10 +2166,11 @@ class _SwitchTile extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final colors = context.wakeWallColors;
     return Container(
       padding: const EdgeInsets.all(14),
       decoration: BoxDecoration(
-        color: WakeWallColors.background,
+        color: colors.background,
         borderRadius: BorderRadius.circular(10),
       ),
       child: Row(
@@ -2162,7 +2185,7 @@ class _SwitchTile extends StatelessWidget {
                   description,
                   style: Theme.of(
                     context,
-                  ).textTheme.bodySmall?.copyWith(color: WakeWallColors.muted),
+                  ).textTheme.bodySmall?.copyWith(color: colors.muted),
                 ),
               ],
             ),
@@ -2216,15 +2239,16 @@ class _StatusPill extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final colors = context.wakeWallColors;
     return Container(
       padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
       decoration: BoxDecoration(
-        color: WakeWallColors.raisedSurface,
+        color: colors.raisedSurface,
         borderRadius: BorderRadius.circular(20),
       ),
       child: Row(
         children: [
-          Icon(icon, size: 14, color: WakeWallColors.muted),
+          Icon(icon, size: 14, color: colors.muted),
           const SizedBox(width: 5),
           Text(label, style: Theme.of(context).textTheme.labelSmall),
         ],

@@ -248,6 +248,7 @@ Temporary bitmaps must be recycled when replaced or when an engine is destroyed.
 - Photo Source: `Ask`, `Photos`, or `Files`
 - Choose Albums After Import
 - Pause WakeWall
+- Theme: `System`, `Light`, or `Dark`
 - Wallpaper Scrolling
 - Backup
 - Restore
@@ -261,6 +262,8 @@ placed directly beside the feature it controls.
 ### Visual Style
 
 - Dark-first interface with a charcoal/neutral background.
+- The original charcoal palette is the app's dark mode. Theme defaults to
+  following the Android system setting, with manual Light and Dark overrides.
 - Inspired by the restrained dark surfaces of Google Messages and ChatGPT.
 - Rounded screens, cards, sheets, thumbnails, and notifications.
 - Blue is the primary accent; avoid the earlier green-heavy utility aesthetic.

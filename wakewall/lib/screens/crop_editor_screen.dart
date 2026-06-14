@@ -161,7 +161,9 @@ class _CropEditorScreenState extends State<CropEditorScreen> {
                               Positioned.fill(
                                 child: IgnorePointer(
                                   child: CustomPaint(
-                                    painter: const _CropGridPainter(),
+                                    painter: _CropGridPainter(
+                                      context.wakeWallColors.teal,
+                                    ),
                                   ),
                                 ),
                               ),
@@ -327,6 +329,7 @@ class _EditorFooter extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final colors = context.wakeWallColors;
     return Padding(
       padding: const EdgeInsets.fromLTRB(24, 8, 24, 22),
       child: Column(
@@ -368,19 +371,15 @@ class _EditorFooter extends StatelessWidget {
                 : Row(
                     mainAxisAlignment: MainAxisAlignment.center,
                     children: [
-                      const Icon(
-                        Icons.pinch_rounded,
-                        size: 18,
-                        color: WakeWallColors.muted,
-                      ),
+                      Icon(Icons.pinch_rounded, size: 18, color: colors.muted),
                       const SizedBox(width: 8),
                       Text(
                         crop.isDefault
                             ? 'Pinch to zoom | Drag to position'
                             : '${crop.scale.toStringAsFixed(1)}x zoom | Drag to position',
-                        style: Theme.of(context).textTheme.bodyMedium?.copyWith(
-                          color: WakeWallColors.muted,
-                        ),
+                        style: Theme.of(
+                          context,
+                        ).textTheme.bodyMedium?.copyWith(color: colors.muted),
                       ),
                     ],
                   ),
@@ -446,6 +445,7 @@ class _FitBackgroundSelector extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final themeColors = context.wakeWallColors;
     return Semantics(
       label: 'Fit background colour',
       child: FittedBox(
@@ -457,7 +457,7 @@ class _FitBackgroundSelector extends StatelessWidget {
               'Border',
               style: Theme.of(
                 context,
-              ).textTheme.bodyMedium?.copyWith(color: WakeWallColors.muted),
+              ).textTheme.bodyMedium?.copyWith(color: themeColors.muted),
             ),
             const SizedBox(width: 12),
             for (final color in colors)
@@ -475,8 +475,8 @@ class _FitBackgroundSelector extends StatelessWidget {
                       shape: BoxShape.circle,
                       border: Border.all(
                         color: color == selected
-                            ? WakeWallColors.tealStrong
-                            : WakeWallColors.outline,
+                            ? themeColors.tealStrong
+                            : themeColors.outline,
                         width: color == selected ? 3 : 1,
                       ),
                     ),
@@ -491,7 +491,9 @@ class _FitBackgroundSelector extends StatelessWidget {
 }
 
 class _CropGridPainter extends CustomPainter {
-  const _CropGridPainter();
+  const _CropGridPainter(this.accent);
+
+  final Color accent;
 
   @override
   void paint(Canvas canvas, Size size) {
@@ -522,12 +524,13 @@ class _CropGridPainter extends CustomPainter {
     canvas.drawRRect(
       RRect.fromRectAndRadius(Offset.zero & size, const Radius.circular(18)),
       Paint()
-        ..color = WakeWallColors.teal.withValues(alpha: .7)
+        ..color = accent.withValues(alpha: .7)
         ..style = PaintingStyle.stroke
         ..strokeWidth = 2,
     );
   }
 
   @override
-  bool shouldRepaint(covariant CustomPainter oldDelegate) => false;
+  bool shouldRepaint(covariant _CropGridPainter oldDelegate) =>
+      oldDelegate.accent != accent;
 }

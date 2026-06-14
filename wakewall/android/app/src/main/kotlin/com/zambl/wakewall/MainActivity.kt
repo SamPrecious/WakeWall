@@ -151,16 +151,17 @@ class MainActivity : FlutterFragmentActivity() {
                         val paused = call.argument<Boolean>("paused") ?: false
                         val shuffle = call.argument<Boolean>("shuffle") ?: false
                         val fit = call.argument<String>("fit") ?: "cropToFill"
+                        val themeMode = call.argument<String>("themeMode") ?: "system"
                         val wallpaperScrolling = call.argument<Boolean>("wallpaperScrolling") ?: false
                         if (!wallpaperScrolling) {
                             val store = WakeWallStore(this)
-                            store.updateSettings(paused, shuffle, fit, wallpaperScrolling)
+                            store.updateSettings(paused, shuffle, fit, themeMode, wallpaperScrolling)
                             notifyWallpaperService()
                             result.success(null)
                         } else {
                             runInBackground(result) {
                                 val store = WakeWallStore(this)
-                                store.updateSettings(paused, shuffle, fit, wallpaperScrolling)
+                                store.updateSettings(paused, shuffle, fit, themeMode, wallpaperScrolling)
                                 store.prepareScrollingRenders()
                                 notifyWallpaperService()
                                 null

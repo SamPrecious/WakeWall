@@ -24,6 +24,7 @@ class WakeWallController extends ChangeNotifier {
   bool _paused = false;
   RotationOrder _order = RotationOrder.shuffle;
   WallpaperFit _fit = WallpaperFit.cropToFill;
+  WakeWallThemeMode _themeMode = WakeWallThemeMode.system;
   bool _wallpaperScrolling = false;
   bool _wakeWallActive = false;
   PhotoSource _photoSource = PhotoSource.askEveryTime;
@@ -42,6 +43,7 @@ class WakeWallController extends ChangeNotifier {
   bool get paused => _paused;
   RotationOrder get order => _order;
   WallpaperFit get fit => _fit;
+  WakeWallThemeMode get themeMode => _themeMode;
   bool get wallpaperScrolling => _wallpaperScrolling;
   bool get wakeWallActive => _wakeWallActive;
   PhotoSource get photoSource => _photoSource;
@@ -339,6 +341,12 @@ class WakeWallController extends ChangeNotifier {
     await _syncSettings();
   }
 
+  Future<void> setThemeMode(WakeWallThemeMode value) async {
+    _themeMode = value;
+    notifyListeners();
+    await _syncSettings();
+  }
+
   Future<void> setWallpaperScrolling(bool value) async {
     _wallpaperScrolling = value;
     notifyListeners();
@@ -363,6 +371,7 @@ class WakeWallController extends ChangeNotifier {
         paused: _paused,
         shuffle: _order == RotationOrder.shuffle,
         fit: _fit.name,
+        themeMode: _themeMode.name,
         wallpaperScrolling: _wallpaperScrolling,
       ),
     );
@@ -408,6 +417,13 @@ class WakeWallController extends ChangeNotifier {
     }
     _wallpaperScrolling =
         configuration['wallpaperScrolling'] as bool? ?? _wallpaperScrolling;
+    final savedThemeMode = configuration['themeMode'] as String?;
+    if (savedThemeMode != null) {
+      _themeMode = WakeWallThemeMode.values.firstWhere(
+        (mode) => mode.name == savedThemeMode,
+        orElse: () => WakeWallThemeMode.system,
+      );
+    }
     _wakeWallActive =
         configuration['wakeWallActive'] as bool? ?? _wakeWallActive;
     final savedSource = configuration['photoSource'] as String?;

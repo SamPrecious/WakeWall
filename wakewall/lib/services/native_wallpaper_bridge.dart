@@ -119,12 +119,14 @@ class NativeWallpaperBridge {
     required bool paused,
     required bool shuffle,
     required String fit,
+    required String themeMode,
     required bool wallpaperScrolling,
   }) async {
     await _channel.invokeMethod<void>('updateSettings', {
       'paused': paused,
       'shuffle': shuffle,
       'fit': fit,
+      'themeMode': themeMode,
       'wallpaperScrolling': wallpaperScrolling,
     });
   }

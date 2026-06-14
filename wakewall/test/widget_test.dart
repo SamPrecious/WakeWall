@@ -137,6 +137,10 @@ void main() {
     expect(find.text('Photo Source'), findsOneWidget);
     expect(find.text('Ask'), findsOneWidget);
     expect(find.text('Files'), findsOneWidget);
+    expect(find.text('Theme'), findsOneWidget);
+    expect(find.text('System'), findsOneWidget);
+    expect(find.text('Light'), findsOneWidget);
+    expect(find.text('Dark'), findsOneWidget);
     expect(find.text('Fit mode'), findsNothing);
     expect(find.text('Backup'), findsOneWidget);
     expect(find.text('Restore'), findsOneWidget);
@@ -159,6 +163,30 @@ void main() {
     expect(find.text('Use WakeWall'), findsNothing);
   });
 
+  testWidgets('theme setting defaults to system and can be changed', (
+    tester,
+  ) async {
+    final bridge = _ThemeSettingsBridge();
+    final controller = WakeWallController(bridge: bridge);
+    await tester.pumpWidget(WakeWallApp(controller: controller));
+    await tester.pumpAndSettle();
+
+    expect(controller.themeMode, WakeWallThemeMode.system);
+
+    await tester.tap(find.byTooltip('Settings'));
+    await tester.pumpAndSettle();
+
+    await tester.tap(find.text('Light'));
+    await tester.pumpAndSettle();
+    expect(controller.themeMode, WakeWallThemeMode.light);
+    expect(bridge.themeMode, 'light');
+
+    await tester.tap(find.text('Dark'));
+    await tester.pumpAndSettle();
+    expect(controller.themeMode, WakeWallThemeMode.dark);
+    expect(bridge.themeMode, 'dark');
+  });
+
   testWidgets('wallpaper scrolling stays off until its warning is accepted', (
     tester,
   ) async {
@@ -169,6 +197,8 @@ void main() {
 
     expect(controller.wallpaperScrolling, isFalse);
     await tester.tap(find.byTooltip('Settings'));
+    await tester.pumpAndSettle();
+    await tester.ensureVisible(find.text('Wallpaper Scrolling'));
     await tester.pumpAndSettle();
     await tester.tap(find.byType(Switch).last);
     await tester.pumpAndSettle();
@@ -392,9 +422,10 @@ void main() {
     expect(find.text('Wallpaper removed'), findsOneWidget);
     expect(bridge.wallpapers.length, 3);
     final notice = tester.widget<SnackBar>(find.byType(SnackBar));
+    final scaffoldContext = tester.element(find.byType(Scaffold).first);
     expect(notice.duration, const Duration(milliseconds: 2800));
     expect(notice.width, 340);
-    expect(notice.action?.textColor, WakeWallColors.tealStrong);
+    expect(notice.action?.textColor, scaffoldContext.wakeWallColors.tealStrong);
     expect(find.byIcon(Icons.delete_outline_rounded), findsWidgets);
     ScaffoldMessenger.of(
       tester.element(find.byType(Scaffold).first),
@@ -528,9 +559,25 @@ class _ScrollingSettingsBridge extends _EmptyBridge {
     required bool paused,
     required bool shuffle,
     required String fit,
+    required String themeMode,
     required bool wallpaperScrolling,
   }) async {
     this.wallpaperScrolling = wallpaperScrolling;
+  }
+}
+
+class _ThemeSettingsBridge extends _EmptyBridge {
+  String themeMode = 'system';
+
+  @override
+  Future<void> updateSettings({
+    required bool paused,
+    required bool shuffle,
+    required String fit,
+    required String themeMode,
+    required bool wallpaperScrolling,
+  }) async {
+    this.themeMode = themeMode;
   }
 }
 
