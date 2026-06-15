@@ -1,6 +1,7 @@
 # WakeWall
 
-WakeWall is an Android live wallpaper app that rotates through a user-selected collection of photos. It is built to solve a small but stubborn Android personalisation gap: many phones can rotate lock-screen wallpapers, but home screen wallpaper rotation is limited, inconsistent, or hidden behind clunky utility apps.
+
+WakeWall is an Android live wallpaper app that rotates through a user-selected collection of photos. It is built to solve a small but stubborn Android personalisation gap that iOS handles natively: a polished wallpaper shuffle that feels built into the phone. Android has workarounds and a small handful of third-party apps, but they often switch after the phone has already unlocked, rely on timers, offer limited control, and look like old utility tools.
 
 WakeWall keeps the workflow simple:
 
@@ -8,7 +9,8 @@ WakeWall keeps the workflow simple:
 Choose wallpapers -> preview and adjust -> enable WakeWall -> wake to a fresh wallpaper
 ```
 
-Under the hood, WakeWall uses a native Android live wallpaper engine so the next image can be prepared before the phone wakes. The result is a wallpaper switcher that feels closer to a polished personalisation feature than a background utility.
+WakeWall utilises a native Android live wallpaper engine to prepare the next image before the phone wakes .This results in a wallpaper switcher that feels native to the phone, rather than bolted on.
+
 
 > This README covers the core WakeWall app. Experimental AI-fill work is intentionally outside this overview.
 
