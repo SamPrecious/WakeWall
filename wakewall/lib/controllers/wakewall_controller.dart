@@ -155,6 +155,44 @@ class WakeWallController extends ChangeNotifier {
     );
   }
 
+  Future<bool> addGeneratedWallpaper(
+    Uint8List bytes, {
+    required String name,
+  }) async {
+    var imported = false;
+    await _runNative(() async {
+      final configuration = await _bridge.importNormalizedImages([
+        {'name': name, 'bytes': bytes},
+      ]);
+      imported =
+          ((configuration['normalizedImportedCount'] as num?)?.toInt() ?? 0) >
+          0;
+      _applyImportResult(configuration);
+      if (imported && _wallpapers.isNotEmpty) {
+        await select(_wallpapers.length - 1);
+      } else {
+        notifyListeners();
+      }
+    });
+    return imported;
+  }
+
+  Future<Uint8List> inpaintAiFill({
+    required Uint8List imageBytes,
+    required Uint8List maskBytes,
+  }) async {
+    try {
+      return await _bridge.inpaintAiFill(
+        imageBytes: imageBytes,
+        maskBytes: maskBytes,
+      );
+    } on MissingPluginException {
+      throw 'AI Fill requires Android.';
+    } on PlatformException catch (error) {
+      throw error.message ?? error.code;
+    }
+  }
+
   Future<void> setPhotoSource(PhotoSource value) async {
     _photoSource = value;
     notifyListeners();

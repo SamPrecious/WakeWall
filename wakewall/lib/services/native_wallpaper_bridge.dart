@@ -74,6 +74,23 @@ class NativeWallpaperBridge {
     return result ?? const {};
   }
 
+  Future<Uint8List> inpaintAiFill({
+    required Uint8List imageBytes,
+    required Uint8List maskBytes,
+  }) async {
+    final result = await _channel.invokeMethod<Uint8List>('inpaintAiFill', {
+      'imageBytes': imageBytes,
+      'maskBytes': maskBytes,
+    });
+    if (result == null || result.isEmpty) {
+      throw PlatformException(
+        code: 'empty_ai_fill',
+        message: 'AI Fill returned no image.',
+      );
+    }
+    return result;
+  }
+
   Future<Map<String, Object?>> backup() async {
     final result = await _channel.invokeMapMethod<String, Object?>('backup');
     return result ?? const {};

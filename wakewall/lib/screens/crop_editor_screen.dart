@@ -3,6 +3,7 @@ import 'dart:math' as math;
 import 'package:auto_route/auto_route.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
+import 'package:image/image.dart' as image;
 
 import '../controllers/wakewall_controller.dart';
 import '../models/wallpaper.dart';
@@ -41,6 +42,8 @@ class _CropEditorScreenState extends State<CropEditorScreen> {
   double gestureStartX = 0;
   double gestureStartY = 0;
   bool saving = false;
+  bool aiFillReady = false;
+  bool aiFillGenerating = false;
 
   Wallpaper get wallpaper =>
       widget.controller.wallpapers[widget.wallpaperIndex];
@@ -214,6 +217,10 @@ class _CropEditorScreenState extends State<CropEditorScreen> {
                 if (value != fitBackgroundColor) _cropTapHaptic();
                 setState(() => fitBackgroundColor = value);
               },
+              aiFillReady: aiFillReady,
+              aiFillGenerating: aiFillGenerating,
+              onAiFillSelected: _prepareAiFill,
+              onAiFillGenerate: _generateAiFill,
             ),
           ],
         ),
@@ -242,6 +249,141 @@ class _CropEditorScreenState extends State<CropEditorScreen> {
       fitBackgroundColor = const Color(0xFF202124);
     });
   }
+
+  Future<void> _prepareAiFill() async {
+    _cropTapHaptic();
+    if (!mounted) return;
+    setState(() => aiFillReady = true);
+  }
+
+  Future<void> _generateAiFill() async {
+    if (aiFillGenerating) return;
+    final sourceBytes = wallpaper.preview;
+    if (sourceBytes == null) {
+      _showCropMessage('AI Fill could not load the source photo preview.');
+      return;
+    }
+
+    _cropCommitHaptic();
+    setState(() => aiFillGenerating = true);
+    try {
+      final input = await _buildAiFillInput(sourceBytes);
+      final inpainted = await widget.controller.inpaintAiFill(
+        imageBytes: input.imageBytes,
+        maskBytes: input.maskBytes,
+      );
+      final generated = _restoreKnownAiFillPixels(input, inpainted);
+      final imported = await widget.controller.addGeneratedWallpaper(
+        generated,
+        name: '${wallpaper.name} AI Fill.jpg',
+      );
+      if (!mounted) return;
+      _showCropMessage(
+        imported ? 'AI filled wallpaper added.' : 'AI fill returned no image.',
+      );
+      if (imported) context.router.pop();
+    } catch (error) {
+      if (!mounted) return;
+      _showCropMessage('AI Fill failed: $error');
+    } finally {
+      if (mounted) setState(() => aiFillGenerating = false);
+    }
+  }
+
+  Future<_AiFillInput> _buildAiFillInput(Uint8List sourceBytes) async {
+    final source = image.decodeImage(sourceBytes);
+    if (source == null) throw 'Could not read the wallpaper preview.';
+
+    const outputWidth = 768;
+    final phoneRatio = _phoneRatio(context);
+    final outputHeight = (outputWidth / phoneRatio).round();
+    final hidden = image.ColorRgb8(0, 0, 0);
+    final known = image.ColorRgb8(255, 255, 255);
+    final canvas = image.Image(width: outputWidth, height: outputHeight);
+    final mask = image.Image(width: outputWidth, height: outputHeight);
+    image.fill(canvas, color: hidden);
+    image.fill(mask, color: hidden);
+
+    final containScale = math.min(
+      outputWidth / source.width,
+      outputHeight / source.height,
+    );
+    final drawnWidth = (source.width * containScale * crop.scale).round();
+    final drawnHeight = (source.height * containScale * crop.scale).round();
+    final resized = image.copyResize(
+      source,
+      width: math.max(1, drawnWidth),
+      height: math.max(1, drawnHeight),
+      interpolation: image.Interpolation.cubic,
+    );
+    final offsetX =
+        (outputWidth - drawnWidth) ~/ 2 + (crop.offsetX * outputWidth).round();
+    final offsetY =
+        (outputHeight - drawnHeight) ~/ 2 +
+        (crop.offsetY * outputHeight).round();
+    image.compositeImage(canvas, resized, dstX: offsetX, dstY: offsetY);
+    final left = math.max(0, offsetX);
+    final top = math.max(0, offsetY);
+    final right = math.min(outputWidth, offsetX + resized.width);
+    final bottom = math.min(outputHeight, offsetY + resized.height);
+    for (var y = top; y < bottom; y++) {
+      for (var x = left; x < right; x++) {
+        mask.setPixel(x, y, known);
+      }
+    }
+
+    return _AiFillInput(
+      imageBytes: Uint8List.fromList(image.encodeJpg(canvas, quality: 92)),
+      maskBytes: Uint8List.fromList(image.encodePng(mask)),
+    );
+  }
+
+  Uint8List _restoreKnownAiFillPixels(
+    _AiFillInput input,
+    Uint8List inpaintedBytes,
+  ) {
+    final canvas = image.decodeImage(input.imageBytes);
+    final mask = image.decodeImage(input.maskBytes);
+    final inpainted = image.decodeImage(inpaintedBytes);
+    if (canvas == null || mask == null || inpainted == null) {
+      throw 'AI Fill returned an unreadable image.';
+    }
+    if (canvas.width != inpainted.width || canvas.height != inpainted.height) {
+      throw 'AI Fill returned the wrong image size.';
+    }
+    for (var y = 0; y < inpainted.height; y++) {
+      for (var x = 0; x < inpainted.width; x++) {
+        if (mask.getPixel(x, y).r > 127) {
+          inpainted.setPixel(x, y, canvas.getPixel(x, y));
+        }
+      }
+    }
+    return Uint8List.fromList(image.encodeJpg(inpainted, quality: 95));
+  }
+
+  void _showCropMessage(String message) {
+    ScaffoldMessenger.of(
+      context,
+    ).showSnackBar(SnackBar(content: Text(message)));
+  }
+}
+
+double _phoneRatio(BuildContext context) {
+  final physicalSize = View.of(context).physicalSize;
+  final displayWidth = math.min(physicalSize.width, physicalSize.height);
+  final displayHeight = math.max(physicalSize.width, physicalSize.height);
+  if (displayWidth > 0 && displayHeight > 0) {
+    return (displayWidth / displayHeight).clamp(.44, .62).toDouble();
+  }
+  final screen = MediaQuery.sizeOf(context);
+  return (screen.width / screen.height).clamp(.44, .62).toDouble();
+}
+
+class _AiFillInput {
+  const _AiFillInput({required this.imageBytes, required this.maskBytes});
+
+  final Uint8List imageBytes;
+  final Uint8List maskBytes;
 }
 
 class _EditorHeader extends StatelessWidget {
@@ -319,6 +461,10 @@ class _EditorFooter extends StatelessWidget {
     required this.fitBackgroundColor,
     required this.onDisplayModeChanged,
     required this.onFitBackgroundColorChanged,
+    required this.aiFillReady,
+    required this.aiFillGenerating,
+    required this.onAiFillSelected,
+    required this.onAiFillGenerate,
   });
 
   final WallpaperCrop crop;
@@ -326,6 +472,10 @@ class _EditorFooter extends StatelessWidget {
   final Color fitBackgroundColor;
   final ValueChanged<WallpaperDisplayMode> onDisplayModeChanged;
   final ValueChanged<Color> onFitBackgroundColorChanged;
+  final bool aiFillReady;
+  final bool aiFillGenerating;
+  final VoidCallback onAiFillSelected;
+  final VoidCallback onAiFillGenerate;
 
   @override
   Widget build(BuildContext context) {
@@ -359,6 +509,36 @@ class _EditorFooter extends StatelessWidget {
               onSelectionChanged: (selection) =>
                   onDisplayModeChanged(selection.first),
             ),
+          ),
+          const SizedBox(height: 10),
+          Row(
+            children: [
+              Expanded(
+                child: OutlinedButton.icon(
+                  onPressed: aiFillGenerating ? null : onAiFillSelected,
+                  icon: const Icon(Icons.auto_fix_high_rounded),
+                  label: const Text('AI Fill'),
+                ),
+              ),
+              if (aiFillReady) ...[
+                const SizedBox(width: 10),
+                Expanded(
+                  child: FilledButton.icon(
+                    onPressed: aiFillGenerating ? null : onAiFillGenerate,
+                    icon: aiFillGenerating
+                        ? const SizedBox(
+                            width: 16,
+                            height: 16,
+                            child: CircularProgressIndicator(strokeWidth: 2),
+                          )
+                        : const Icon(Icons.auto_awesome_rounded),
+                    label: Text(
+                      aiFillGenerating ? 'Generating' : 'Generate Borders',
+                    ),
+                  ),
+                ),
+              ],
+            ],
           ),
           const SizedBox(height: 12),
           SizedBox(

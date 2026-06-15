@@ -69,6 +69,23 @@ class MainActivity : FlutterFragmentActivity() {
                             }
                         }
                     }
+                    "inpaintAiFill" -> {
+                        val imageBytes = call.argument<ByteArray>("imageBytes")
+                            ?: return@setMethodCallHandler result.error(
+                                "missing_image",
+                                "AI Fill did not receive an image.",
+                                null,
+                            )
+                        val maskBytes = call.argument<ByteArray>("maskBytes")
+                            ?: return@setMethodCallHandler result.error(
+                                "missing_mask",
+                                "AI Fill did not receive a mask.",
+                                null,
+                            )
+                        runInBackground(result) {
+                            LamaInpainter(this).inpaint(imageBytes, maskBytes)
+                        }
+                    }
                     "openWallpaperPicker" -> {
                         openWallpaperPicker()
                         result.success(null)
