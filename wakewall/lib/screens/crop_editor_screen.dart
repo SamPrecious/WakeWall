@@ -36,6 +36,7 @@ class _CropEditorScreenState extends State<CropEditorScreen> {
   late WallpaperCrop crop;
   late WallpaperDisplayMode displayMode;
   late Color fitBackgroundColor;
+  int rotationQuarterTurns = 0;
   double gestureStartScale = 1;
   Offset gestureStartFocalPoint = Offset.zero;
   double gestureStartX = 0;
@@ -48,7 +49,8 @@ class _CropEditorScreenState extends State<CropEditorScreen> {
   bool get canReset =>
       !crop.isDefault ||
       displayMode != WallpaperDisplayMode.fill ||
-      fitBackgroundColor != const Color(0xFF202124);
+      fitBackgroundColor != const Color(0xFF202124) ||
+      rotationQuarterTurns != 0;
 
   @override
   void initState() {
@@ -85,6 +87,19 @@ class _CropEditorScreenState extends State<CropEditorScreen> {
                     (constraints.maxWidth - 40) / phoneRatio,
                   );
                   final width = height * phoneRatio;
+                  final rotatedSideways = rotationQuarterTurns.isOdd;
+                  final sourceWidth =
+                      (rotatedSideways
+                              ? wallpaper.imageHeight
+                              : wallpaper.imageWidth)
+                          ?.toDouble() ??
+                      width;
+                  final sourceHeight =
+                      (rotatedSideways
+                              ? wallpaper.imageWidth
+                              : wallpaper.imageHeight)
+                          ?.toDouble() ??
+                      height;
 
                   return Center(
                     child: Semantics(
@@ -104,10 +119,6 @@ class _CropEditorScreenState extends State<CropEditorScreen> {
                               .clamp(1.0, 4.0);
                           final delta =
                               details.focalPoint - gestureStartFocalPoint;
-                          final sourceWidth =
-                              wallpaper.imageWidth?.toDouble() ?? width;
-                          final sourceHeight =
-                              wallpaper.imageHeight?.toDouble() ?? height;
                           final baseScale =
                               displayMode == WallpaperDisplayMode.fill
                               ? math.max(
@@ -155,6 +166,7 @@ class _CropEditorScreenState extends State<CropEditorScreen> {
                                   displayMode: displayMode,
                                   fitBackgroundColor: fitBackgroundColor,
                                   previewBytes: wallpaper.preview,
+                                  rotationQuarterTurns: rotationQuarterTurns,
                                   borderRadius: BorderRadius.circular(18),
                                 ),
                               ),
@@ -168,8 +180,17 @@ class _CropEditorScreenState extends State<CropEditorScreen> {
                                 ),
                               ),
                               Positioned(
-                                top: 14,
                                 right: 14,
+                                bottom: 14,
+                                child: _CropOverlayButton(
+                                  icon: Icons.crop_rotate_rounded,
+                                  tooltip: 'Rotate wallpaper',
+                                  onTap: _rotate,
+                                ),
+                              ),
+                              Positioned(
+                                left: 14,
+                                bottom: 14,
                                 child: AnimatedSwitcher(
                                   duration: const Duration(milliseconds: 240),
                                   reverseDuration: const Duration(
@@ -182,7 +203,7 @@ class _CropEditorScreenState extends State<CropEditorScreen> {
                                           key: const ValueKey(
                                             'crop-reset-visible',
                                           ),
-                                          icon: Icons.restart_alt_rounded,
+                                          icon: Icons.replay_rounded,
                                           tooltip: 'Reset wallpaper',
                                           onTap: _reset,
                                         )
@@ -229,6 +250,7 @@ class _CropEditorScreenState extends State<CropEditorScreen> {
       crop,
       displayMode: displayMode,
       fitBackgroundColor: fitBackgroundColor,
+      rotationQuarterTurns: rotationQuarterTurns,
     );
     if (!mounted) return;
     context.router.pop();
@@ -238,8 +260,17 @@ class _CropEditorScreenState extends State<CropEditorScreen> {
     _cropCommitHaptic();
     setState(() {
       crop = const WallpaperCrop();
+      rotationQuarterTurns = 0;
       displayMode = WallpaperDisplayMode.fill;
       fitBackgroundColor = const Color(0xFF202124);
+    });
+  }
+
+  void _rotate() {
+    _cropTapHaptic();
+    setState(() {
+      rotationQuarterTurns = (rotationQuarterTurns + 1) % 4;
+      crop = const WallpaperCrop();
     });
   }
 }

@@ -243,6 +243,8 @@ class MainActivity : FlutterFragmentActivity() {
                                 fitBackgroundColor =
                                     call.argument<Number>("fitBackgroundColor")?.toLong()?.toInt()
                                         ?: 0xFF202124.toInt(),
+                                rotationQuarterTurns =
+                                    call.argument<Int>("rotationQuarterTurns") ?: 0,
                             )
                             sendBroadcast(
                                 Intent(WakeWallService.ACTION_CROP_UPDATED).setPackage(packageName)

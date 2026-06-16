@@ -100,6 +100,7 @@ class WakeWallController extends ChangeNotifier {
     WallpaperCrop crop, {
     WallpaperDisplayMode? displayMode,
     Color? fitBackgroundColor,
+    int rotationQuarterTurns = 0,
   }) async {
     if (index < 0 || index >= _wallpapers.length) return;
     final selectedMode = displayMode ?? _wallpapers[index].displayMode;
@@ -120,6 +121,7 @@ class WakeWallController extends ChangeNotifier {
           offsetY: crop.offsetY,
           displayMode: selectedMode.name,
           fitBackgroundColor: selectedFitColor.toARGB32(),
+          rotationQuarterTurns: rotationQuarterTurns,
         ),
       );
       if (updated != null) {
@@ -184,6 +186,18 @@ class WakeWallController extends ChangeNotifier {
       _applyNativeConfiguration(
         () => _bridge.updateWallpaperAlbums(wallpaper.id, ids),
       );
+
+  Future<void> revealImportedAlbumSelection(
+    Set<String> assignedAlbumIds,
+  ) async {
+    if (_activeAlbumIds.isEmpty) return;
+    if (assignedAlbumIds.isEmpty) {
+      await setActiveAlbums({});
+      return;
+    }
+    if (assignedAlbumIds.any(_activeAlbumIds.contains)) return;
+    await setActiveAlbums({});
+  }
 
   Future<void> setImportAlbumPreference(bool ask, Set<String> ids) async {
     _askAlbumsAfterImport = ask;

@@ -429,8 +429,17 @@ void main() {
     expect(bridge.wallpapers.length, 3);
     final notice = tester.widget<SnackBar>(find.byType(SnackBar));
     final scaffoldContext = tester.element(find.byType(Scaffold).first);
+    final noticeMargin = notice.margin!.resolve(TextDirection.ltr);
     expect(notice.duration, const Duration(milliseconds: 2800));
-    expect(notice.width, 340);
+    expect(notice.width, isNull);
+    expect(noticeMargin.left, greaterThanOrEqualTo(28));
+    expect(noticeMargin.right, greaterThanOrEqualTo(28));
+    expect(noticeMargin.bottom, greaterThanOrEqualTo(28));
+    expect(
+      notice.padding,
+      const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
+    );
+    expect(notice.dismissDirection, DismissDirection.down);
     expect(notice.action?.textColor, scaffoldContext.wakeWallColors.tealStrong);
     expect(find.byIcon(Icons.delete_outline_rounded), findsWidgets);
     ScaffoldMessenger.of(
@@ -456,6 +465,7 @@ void main() {
     expect(find.text('Fit'), findsOneWidget);
     expect(find.text('Blur'), findsOneWidget);
     expect(find.text('Pinch to zoom | Drag to position'), findsOneWidget);
+    expect(find.byTooltip('Rotate wallpaper'), findsOneWidget);
 
     final center = tester.getCenter(
       find.text('Pinch to zoom | Drag to position'),
@@ -471,6 +481,9 @@ void main() {
     await secondFinger.up();
     await tester.pumpAndSettle();
 
+    expect(find.byTooltip('Reset wallpaper'), findsOneWidget);
+    await tester.tap(find.byTooltip('Rotate wallpaper'));
+    await tester.pumpAndSettle();
     expect(find.byTooltip('Reset wallpaper'), findsOneWidget);
     await tester.tap(find.byKey(const ValueKey('crop-editor-cancel')));
     await tester.pumpAndSettle();

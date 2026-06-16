@@ -16,6 +16,7 @@ class AbstractWallpaper extends StatelessWidget {
     this.previewBytes,
     this.applyCrop = true,
     this.filterQuality = FilterQuality.high,
+    this.rotationQuarterTurns = 0,
     super.key,
   });
 
@@ -27,6 +28,7 @@ class AbstractWallpaper extends StatelessWidget {
   final Uint8List? previewBytes;
   final bool applyCrop;
   final FilterQuality filterQuality;
+  final int rotationQuarterTurns;
 
   @override
   Widget build(BuildContext context) {
@@ -39,14 +41,32 @@ class AbstractWallpaper extends StatelessWidget {
           final activeFitColor =
               fitBackgroundColor ?? wallpaper.fitBackgroundColor;
           final imageBytes = previewBytes ?? wallpaper.thumbnail;
+          final turns = ((rotationQuarterTurns % 4) + 4) % 4;
+          final rotatedSideways = turns.isOdd;
+          Widget memoryImage({
+            required BoxFit fit,
+            double? width,
+            double? height,
+            FilterQuality? quality,
+          }) {
+            final image = Image.memory(
+              imageBytes!,
+              width: rotatedSideways ? height : width,
+              height: rotatedSideways ? width : height,
+              fit: fit,
+              gaplessPlayback: true,
+              filterQuality: quality ?? filterQuality,
+            );
+            return turns == 0
+                ? image
+                : RotatedBox(quarterTurns: turns, child: image);
+          }
+
           if (imageBytes != null && !applyCrop) {
-            return Image.memory(
-              imageBytes,
+            return memoryImage(
               width: constraints.maxWidth,
               height: constraints.maxHeight,
               fit: BoxFit.cover,
-              gaplessPlayback: true,
-              filterQuality: filterQuality,
             );
           }
           final useFullSource =
@@ -55,9 +75,13 @@ class AbstractWallpaper extends StatelessWidget {
               wallpaper.imageHeight != null;
           if (imageBytes != null && activeMode != WallpaperDisplayMode.fill) {
             final sourceWidth =
-                wallpaper.imageWidth?.toDouble() ?? constraints.maxWidth;
+                (rotatedSideways ? wallpaper.imageHeight : wallpaper.imageWidth)
+                    ?.toDouble() ??
+                constraints.maxWidth;
             final sourceHeight =
-                wallpaper.imageHeight?.toDouble() ?? constraints.maxHeight;
+                (rotatedSideways ? wallpaper.imageWidth : wallpaper.imageHeight)
+                    ?.toDouble() ??
+                constraints.maxHeight;
             final containScale = math.min(
               constraints.maxWidth / sourceWidth,
               constraints.maxHeight / sourceHeight,
@@ -82,11 +106,9 @@ class AbstractWallpaper extends StatelessWidget {
                     imageFilter: ui.ImageFilter.blur(sigmaX: 24, sigmaY: 24),
                     child: Transform.scale(
                       scale: 1.12,
-                      child: Image.memory(
-                        imageBytes,
+                      child: memoryImage(
                         fit: BoxFit.cover,
-                        gaplessPlayback: true,
-                        filterQuality: FilterQuality.medium,
+                        quality: FilterQuality.medium,
                       ),
                     ),
                   )
@@ -108,12 +130,7 @@ class AbstractWallpaper extends StatelessWidget {
                       child: SizedBox(
                         width: drawnWidth,
                         height: drawnHeight,
-                        child: Image.memory(
-                          imageBytes,
-                          fit: BoxFit.contain,
-                          gaplessPlayback: true,
-                          filterQuality: filterQuality,
-                        ),
+                        child: memoryImage(fit: BoxFit.contain),
                       ),
                     ),
                   ),
@@ -122,8 +139,16 @@ class AbstractWallpaper extends StatelessWidget {
             );
           }
           if (imageBytes != null && useFullSource) {
-            final sourceWidth = wallpaper.imageWidth!.toDouble();
-            final sourceHeight = wallpaper.imageHeight!.toDouble();
+            final sourceWidth =
+                (rotatedSideways
+                        ? wallpaper.imageHeight!
+                        : wallpaper.imageWidth!)
+                    .toDouble();
+            final sourceHeight =
+                (rotatedSideways
+                        ? wallpaper.imageWidth!
+                        : wallpaper.imageHeight!)
+                    .toDouble();
             final coverScale = math.max(
               constraints.maxWidth / sourceWidth,
               constraints.maxHeight / sourceHeight,
@@ -156,12 +181,7 @@ class AbstractWallpaper extends StatelessWidget {
                   child: SizedBox(
                     width: drawnWidth,
                     height: drawnHeight,
-                    child: Image.memory(
-                      imageBytes,
-                      fit: BoxFit.cover,
-                      gaplessPlayback: true,
-                      filterQuality: filterQuality,
-                    ),
+                    child: memoryImage(fit: BoxFit.cover),
                   ),
                 ),
               ),
@@ -175,13 +195,10 @@ class AbstractWallpaper extends StatelessWidget {
             child: Transform.scale(
               scale: activeCrop.scale,
               child: imageBytes != null
-                  ? Image.memory(
-                      imageBytes,
+                  ? memoryImage(
                       width: constraints.maxWidth,
                       height: constraints.maxHeight,
                       fit: BoxFit.cover,
-                      gaplessPlayback: true,
-                      filterQuality: filterQuality,
                     )
                   : wallpaper.isUserImage
                   ? const ColoredBox(

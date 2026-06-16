@@ -142,6 +142,12 @@ Albums are lightweight memberships, not duplicated image folders.
 - An image with no album membership still exists in `All Wallpapers`.
 - Import assignment may select no album, one album, or multiple albums.
 - The user may choose whether WakeWall asks for album assignment after imports.
+- If an import would be visible in the current active album filter, WakeWall
+  keeps the current view. If the import is assigned only to albums outside the
+  current filter, or to no album while a filtered view is active, WakeWall
+  switches to `All Wallpapers` so the new wallpaper is visible immediately.
+  `All Wallpapers` itself remains unchanged because it already includes
+  everything.
 
 ### Album Deletion
 
@@ -163,6 +169,9 @@ Every wallpaper stores its own crop transform and display mode.
 - The user can pinch to zoom and drag to position in every display mode.
 - Crop offsets and scale are persisted per wallpaper.
 - Reset returns to Fill, default crop, and default Fit background colour.
+- The crop editor can rotate an image before saving. Saving a rotation rewrites
+  the app-private source image as the new orientation and regenerates the normal
+  previews/renders rather than storing an extra rotation layer.
 
 ### Display Modes
 

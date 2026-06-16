@@ -98,6 +98,34 @@ void main() {
     expect(controller.defaultImportAlbumIds, {'dogs'});
   });
 
+  test(
+    'imported wallpapers switch to all when outside the current view',
+    () async {
+      final bridge = _AlbumBridge();
+      final controller = WakeWallController(bridge: bridge);
+
+      await controller.initialize();
+      await controller.setActiveAlbums({'dogs'});
+      await controller.revealImportedAlbumSelection({'nature'});
+
+      expect(controller.activeAlbumIds, isEmpty);
+
+      await controller.setActiveAlbums({'dogs', 'nature'});
+      await controller.revealImportedAlbumSelection({'nature'});
+
+      expect(controller.activeAlbumIds, {'dogs', 'nature'});
+
+      await controller.setActiveAlbums({});
+      await controller.revealImportedAlbumSelection({'nature'});
+      expect(controller.activeAlbumIds, isEmpty);
+
+      await controller.setActiveAlbums({'dogs'});
+      await controller.revealImportedAlbumSelection({});
+
+      expect(controller.activeAlbumIds, isEmpty);
+    },
+  );
+
   test('saving a crop replaces its baked UI previews', () async {
     final bridge = _FakeNativeWallpaperBridge(currentIndex: 0);
     final controller = WakeWallController(bridge: bridge);
@@ -320,6 +348,7 @@ class _FakeNativeWallpaperBridge extends NativeWallpaperBridge {
     required double offsetY,
     required String displayMode,
     required int fitBackgroundColor,
+    required int rotationQuarterTurns,
   }) async => {
     ...wallpapers[index],
     'mainPreview': croppedPreviewBytes,

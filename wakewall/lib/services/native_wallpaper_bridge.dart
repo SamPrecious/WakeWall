@@ -138,6 +138,7 @@ class NativeWallpaperBridge {
     required double offsetY,
     required String displayMode,
     required int fitBackgroundColor,
+    required int rotationQuarterTurns,
   }) async {
     final result = await _channel
         .invokeMapMethod<String, Object?>('updateCrop', {
@@ -147,6 +148,7 @@ class NativeWallpaperBridge {
           'offsetY': offsetY,
           'displayMode': displayMode,
           'fitBackgroundColor': fitBackgroundColor,
+          'rotationQuarterTurns': rotationQuarterTurns,
         });
     return result ?? const {};
   }

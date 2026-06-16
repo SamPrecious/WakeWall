@@ -8,6 +8,7 @@ import android.graphics.BitmapFactory
 import android.graphics.Canvas
 import android.graphics.Color
 import android.graphics.ImageDecoder
+import android.graphics.Matrix
 import android.graphics.Paint
 import android.graphics.Point
 import android.net.Uri
@@ -492,8 +493,10 @@ class WakeWallStore(context: Context) {
         offsetY: Double,
         displayMode: String,
         fitBackgroundColor: Int,
+        rotationQuarterTurns: Int = 0,
     ) {
         val value = wallpaperAt(index) ?: return
+        rotateLocalSource(value, rotationQuarterTurns)
         val key = cropKey(value)
         prefs.edit()
             .putFloat("${key}_scale", scale.toFloat())
@@ -506,6 +509,42 @@ class WakeWallStore(context: Context) {
             .remove("${legacyCropKey(value)}_y")
             .apply()
         deleteCachedPreviews(value)
+    }
+
+    private fun rotateLocalSource(value: String, quarterTurns: Int): Boolean {
+        val turns = quarterTurns.mod(4)
+        if (turns == 0) return true
+        val original = localFile(value) ?: return false
+        val decoded = decodeNormalizedBitmap(original) ?: return false
+        val rotated = runCatching {
+            Bitmap.createBitmap(
+                decoded,
+                0,
+                0,
+                decoded.width,
+                decoded.height,
+                Matrix().apply { postRotate(90f * turns) },
+                true,
+            )
+        }.getOrNull()
+        if (rotated == null) {
+            decoded.recycle()
+            return false
+        }
+        if (rotated !== decoded) decoded.recycle()
+
+        val replacement = File(original.parentFile, "${UUID.randomUUID()}.jpg")
+        if (!saveAsJpeg(rotated, replacement)) {
+            replacement.delete()
+            return false
+        }
+        val replaced = runCatching {
+            replacement.copyTo(original, overwrite = true)
+            true
+        }.getOrDefault(false)
+        replacement.delete()
+        if (replaced) deleteCachedPreviews(value)
+        return replaced
     }
 
     fun crop(index: Int): CropTransform {

@@ -13,7 +13,8 @@ import '../theme/wakewall_theme.dart';
 import '../widgets/abstract_wallpaper.dart';
 
 const _noticeVisibleDuration = Duration(milliseconds: 2800);
-const _noticeFadeDuration = Duration(milliseconds: 180);
+const _noticeEnterDuration = Duration(milliseconds: 320);
+const _noticeExitDuration = Duration(milliseconds: 260);
 const _wallpaperStripHeaderHeight = 34.0;
 
 void _wakeWallTapHaptic() {
@@ -53,18 +54,29 @@ ScaffoldFeatureController<SnackBar, SnackBarClosedReason> _showWakeWallNotice(
 }) {
   final colors = context.wakeWallColors;
   final messenger = ScaffoldMessenger.of(context);
+  final screenWidth = MediaQuery.sizeOf(context).width;
+  final bottomSafeArea = MediaQuery.viewPaddingOf(context).bottom;
+  final horizontalMargin = math.max(28.0, (screenWidth - 330) / 2);
+  final bottomMargin = math.max(28.0, bottomSafeArea + 24);
   messenger.hideCurrentSnackBar();
   final notice = messenger.showSnackBar(
     SnackBar(
       behavior: SnackBarBehavior.floating,
-      width: math.min(MediaQuery.sizeOf(context).width - 56, 340.0),
+      margin: EdgeInsets.fromLTRB(
+        horizontalMargin,
+        0,
+        horizontalMargin,
+        bottomMargin,
+      ),
       duration: _noticeVisibleDuration,
-      padding: const EdgeInsets.symmetric(horizontal: 18, vertical: 16),
-      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(26)),
+      padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
+      dismissDirection: DismissDirection.down,
+      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(999)),
       content: Row(
+        mainAxisSize: MainAxisSize.min,
         children: [
-          Icon(icon, color: iconColor ?? colors.muted, size: 22),
-          const SizedBox(width: 12),
+          Icon(icon, color: iconColor ?? colors.muted, size: 18),
+          const SizedBox(width: 10),
           Expanded(child: Text(message)),
         ],
       ),
@@ -80,8 +92,8 @@ ScaffoldFeatureController<SnackBar, SnackBarClosedReason> _showWakeWallNotice(
             ),
     ),
     snackBarAnimationStyle: const AnimationStyle(
-      duration: _noticeFadeDuration,
-      reverseDuration: _noticeFadeDuration,
+      duration: _noticeEnterDuration,
+      reverseDuration: _noticeExitDuration,
     ),
   );
   Timer? timeout;
@@ -410,19 +422,22 @@ class _HomeScreenState extends State<HomeScreen> {
         .where((wallpaper) => !existingIds.contains(wallpaper.id))
         .toList();
     if (added.isNotEmpty && mounted) {
+      Set<String> assignedAlbumIds = controller.defaultImportAlbumIds;
       if (controller.askAlbumsAfterImport) {
-        await showModalBottomSheet<void>(
-          context: context,
-          isScrollControlled: true,
-          useSafeArea: true,
-          isDismissible: false,
-          enableDrag: false,
-          builder: (_) => _AssignAlbumsSheet(
-            controller: controller,
-            wallpapers: added,
-            isImport: true,
-          ),
-        );
+        assignedAlbumIds =
+            await showModalBottomSheet<Set<String>>(
+              context: context,
+              isScrollControlled: true,
+              useSafeArea: true,
+              isDismissible: false,
+              enableDrag: false,
+              builder: (_) => _AssignAlbumsSheet(
+                controller: controller,
+                wallpapers: added,
+                isImport: true,
+              ),
+            ) ??
+            {};
       } else {
         for (final wallpaper in added) {
           await controller.updateWallpaperAlbums(
@@ -431,6 +446,7 @@ class _HomeScreenState extends State<HomeScreen> {
           );
         }
       }
+      await controller.revealImportedAlbumSelection(assignedAlbumIds);
     }
     if (mounted && wasEmpty && controller.hasWallpapers) {
       await _offerWallpaperSetupIfNeeded(context, controller);
@@ -968,13 +984,32 @@ class _WallpaperStripState extends State<_WallpaperStrip> {
   final ScrollController scrollController = ScrollController();
   int? optimisticSelectedIndex;
   int selectionSerial = 0;
+  int previousWallpaperCount = 0;
 
   WakeWallController get controller => widget.controller;
 
   @override
+  void initState() {
+    super.initState();
+    previousWallpaperCount = controller.wallpapers.length;
+    controller.addListener(handleWallpaperCollectionChanged);
+  }
+
+  @override
   void dispose() {
+    controller.removeListener(handleWallpaperCollectionChanged);
     scrollController.dispose();
     super.dispose();
+  }
+
+  void handleWallpaperCollectionChanged() {
+    final count = controller.wallpapers.length;
+    if (count <= previousWallpaperCount) {
+      previousWallpaperCount = count;
+      return;
+    }
+    previousWallpaperCount = count;
+    scrollToEndAfterLayout();
   }
 
   // Scrolls the collection when a lifted wallpaper nears either screen edge.
@@ -1026,6 +1061,19 @@ class _WallpaperStripState extends State<_WallpaperStrip> {
         }
       }),
     );
+  }
+
+  void scrollToEndAfterLayout() {
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (!mounted || !scrollController.hasClients) return;
+        scrollController.animateTo(
+          scrollController.position.maxScrollExtent,
+          duration: const Duration(milliseconds: 260),
+          curve: Curves.easeOutCubic,
+        );
+      });
+    });
   }
 
   @override
@@ -1533,7 +1581,7 @@ class _AssignAlbumsSheetState extends State<_AssignAlbumsSheet> {
     if (widget.isImport && remember) {
       await widget.controller.setImportAlbumPreference(false, selected);
     }
-    if (mounted) Navigator.pop(context);
+    if (mounted) Navigator.pop(context, selected);
   }
 
   Future<void> _createAlbum() async {
