@@ -6,6 +6,7 @@ import org.json.JSONObject
 
 // Persists unfinished imports and deletions so process death cannot leak files.
 class WakeWallTransactionStore(private val prefs: SharedPreferences) {
+    // Removal entries survive app death until either Undo wins or the timer expires.
     fun recordRemoval(value: String, deadline: Long) = synchronized(LOCK) {
         saveRemovals(pendingRemovals().apply { put(value, deadline) })
     }
@@ -34,6 +35,7 @@ class WakeWallTransactionStore(private val prefs: SharedPreferences) {
         saveImports(pendingImports().apply { add(value) })
     }
 
+    // A finished import is now safely present in the wallpaper list.
     fun finishImport(value: String) = synchronized(LOCK) {
         val pending = pendingImports()
         if (pending.remove(value)) saveImports(pending)

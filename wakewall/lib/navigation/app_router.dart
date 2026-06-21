@@ -12,6 +12,7 @@ class AppRouter extends RootStackRouter {
   @override
   List<AutoRoute> get routes => [
     AutoRoute(page: HomeRoute.page, initial: true),
+    // The crop editor behaves like a temporary sheet over the home screen.
     CustomRoute(
       page: CropEditorRoute.page,
       transitionsBuilder: TransitionsBuilders.slideBottom,

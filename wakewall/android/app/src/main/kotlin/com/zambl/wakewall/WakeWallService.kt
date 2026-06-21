@@ -59,6 +59,7 @@ class WakeWallService : WallpaperService() {
             redrawCurrentAndPrepare()
         }
 
+        // Before first unlock, draw only the device-protected boot frame.
         private fun unlockedStore(): WakeWallStore? =
             if (bootFrameStore.credentialStorageAvailable()) store else null
 
@@ -73,6 +74,7 @@ class WakeWallService : WallpaperService() {
                         if (visible) scheduleRebuild()
                     }
                     Intent.ACTION_USER_UNLOCKED -> {
+                        // Switch from the boot frame back to the real wallpaper library.
                         val activeStore = unlockedStore() ?: return
                         currentIndex = activeStore.index
                         updateScrollingMode(activeStore)
@@ -131,6 +133,7 @@ class WakeWallService : WallpaperService() {
         override fun onVisibilityChanged(isVisible: Boolean) {
             visible = isVisible
             if (unlockedStore() == null) {
+                // Android may reveal the lock screen before credential storage opens.
                 postBootFrame(allowHidden = true)
                 return
             }
@@ -329,6 +332,7 @@ class WakeWallService : WallpaperService() {
                     runCatching { drawWallpaper(Canvas(it), nextIndex, activeStore) }.isSuccess
                 } == true
                 handler.post {
+                    // Drop stale work if the selected wallpaper changed while decoding.
                     val stillNeeded = !destroyed &&
                         generation == preparationGeneration &&
                         currentIndex == sourceIndex &&
@@ -554,6 +558,7 @@ class WakeWallService : WallpaperService() {
                 BitmapFactory.decodeFile(it.absolutePath)
             }
             if (rendered != null && rendered.width > 0 && rendered.height > 0) {
+                // Prefer pre-rendered phone-sized files; decoding originals is the fallback.
                 val renderedRatio = rendered.width.toFloat() / rendered.height
                 val canvasRatio = width / height
                 if (kotlin.math.abs(renderedRatio - canvasRatio) < .035f) {

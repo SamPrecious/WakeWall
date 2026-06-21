@@ -8,6 +8,7 @@ import 'package:image/image.dart' as image;
 import '../models/wallpaper.dart';
 import '../services/native_wallpaper_bridge.dart';
 
+// Owns the app-facing state and keeps it in sync with Android's wallpaper store.
 class WakeWallController extends ChangeNotifier {
   WakeWallController({NativeWallpaperBridge? bridge})
     : _bridge = bridge ?? NativeWallpaperBridge();
@@ -85,6 +86,7 @@ class WakeWallController extends ChangeNotifier {
 
   Future<void> select(int index) async {
     if (index < 0 || index >= _wallpapers.length) return;
+    // Update the UI first, then let Android confirm the real current index.
     _setSelectedIndex(index);
     await _runNative(() async {
       final selected = await _bridge.setCurrent(index);
@@ -133,6 +135,7 @@ class WakeWallController extends ChangeNotifier {
 
   Future<void> next() async {
     if (_wallpapers.isEmpty) return;
+    // Manual next feels instant while Android updates the live wallpaper.
     _setSelectedIndex((_selectedIndex + 1) % _wallpapers.length);
     await _runNative(() async {
       final next = await _bridge.showNext();
@@ -190,6 +193,7 @@ class WakeWallController extends ChangeNotifier {
   Future<void> revealImportedAlbumSelection(
     Set<String> assignedAlbumIds,
   ) async {
+    // If the new wallpaper would be hidden by the active filters, reveal All Wallpapers.
     if (_activeAlbumIds.isEmpty) return;
     if (assignedAlbumIds.isEmpty) {
       await setActiveAlbums({});
@@ -211,6 +215,7 @@ class WakeWallController extends ChangeNotifier {
   Future<void> _applyNativeConfiguration(
     Future<Map<String, Object?>> Function() action,
   ) async {
+    // Most settings return a complete native state, so this shared path applies it.
     await _runNative(() async {
       _applyConfiguration(await action());
       notifyListeners();
@@ -245,6 +250,7 @@ class WakeWallController extends ChangeNotifier {
         final failedWithoutBytes =
             (configuration['failedWithoutBytesCount'] as num?)?.toInt() ?? 0;
         var storedRecovered = 0;
+        // Some providers expose bytes Flutter can decode even when Android cannot.
         for (final value in failedImages) {
           final data = Map<Object?, Object?>.from(value! as Map);
           final normalized = await compute(_normalizeFailedImage, {
@@ -396,6 +402,7 @@ class WakeWallController extends ChangeNotifier {
     bool applyResult = false,
     VoidCallback? onOperationStarted,
   }) async {
+    // Backup and restore launch Android file pickers, so progress starts later.
     _bridge.setFileOperationStartedListener(onOperationStarted);
     try {
       _lastNativeError = null;
@@ -518,6 +525,7 @@ class WakeWallController extends ChangeNotifier {
   Wallpaper? _wallpaperFromNative(Object? value) {
     if (value is! Map) return null;
     final data = Map<Object?, Object?>.from(value);
+    // Native sends compact maps so Flutter never receives the full original image.
     final sampleIndex = (data['sampleIndex'] as num?)?.toInt();
     final cropValue = data['crop'];
     final cropData = cropValue is Map
@@ -604,7 +612,7 @@ class WallpaperRemoval {
   final bool wasSelected;
 }
 
-// Rewrites photos Android cannot decode into a clean, standard JPEG.
+// Rewrites photos Android cannot decode into a clean, capped JPEG on an isolate.
 Map<String, Object?>? _normalizeFailedImage(Map<String, Object?> value) {
   try {
     final decoded = image.decodeImage(value['bytes']! as Uint8List);

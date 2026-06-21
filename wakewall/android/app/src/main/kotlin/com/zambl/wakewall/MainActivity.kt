@@ -52,6 +52,7 @@ class MainActivity : FlutterFragmentActivity() {
                     "backup" -> createBackup(result)
                     "restore" -> restoreBackup(result)
                     "importNormalizedImages" -> {
+                        // Flutter sends cleaned JPEGs here after its fallback decoder succeeds.
                         val images = call.argument<List<Map<String, Any>>>("images").orEmpty()
                             .mapNotNull { image ->
                                 val name = image["name"] as? String ?: return@mapNotNull null
@@ -159,6 +160,7 @@ class MainActivity : FlutterFragmentActivity() {
                             notifyWallpaperService()
                             result.success(null)
                         } else {
+                            // Scrolling needs wider renders ready before the setting is exposed.
                             runInBackground(result) {
                                 val store = WakeWallStore(this)
                                 store.updateSettings(paused, shuffle, fit, themeMode, wallpaperScrolling)
@@ -264,6 +266,7 @@ class MainActivity : FlutterFragmentActivity() {
     }
 
     private fun handlePickedImages(uris: List<Uri>) {
+        // Persist access first; some providers revoke temporary URIs after the picker returns.
         uris.forEach { uri ->
             runCatching {
                 contentResolver.takePersistableUriPermission(uri, Intent.FLAG_GRANT_READ_URI_PERMISSION)
@@ -277,6 +280,7 @@ class MainActivity : FlutterFragmentActivity() {
             return
         }
         sendImportProgress(0, uris.size)
+        // Import can decode huge images, so it must stay off Flutter and Android UI threads.
         runInBackground(result) {
             val store = WakeWallStore(this)
             val summary = store.addImages(uris) { completed ->
@@ -349,6 +353,7 @@ class MainActivity : FlutterFragmentActivity() {
             result.success(mapOf("cancelled" to true))
             return
         }
+        // Let Flutter show progress only after the save destination exists.
         controlChannel.invokeMethod("fileOperationStarted", null)
         runInBackground(result) {
             contentResolver.openOutputStream(uri, "w")?.use { WakeWallStore(this).writeBackup(it) }
@@ -364,6 +369,7 @@ class MainActivity : FlutterFragmentActivity() {
             result.success(mapOf("cancelled" to true))
             return
         }
+        // Restore replaces the full library, so Flutter gets a fresh configuration after it.
         controlChannel.invokeMethod("fileOperationStarted", null)
         runInBackground(result) {
             val store = WakeWallStore(this)
@@ -412,6 +418,7 @@ class MainActivity : FlutterFragmentActivity() {
     private fun configurationWithStatus(store: WakeWallStore): Map<String, Any> =
         store.configuration() + mapOf("wakeWallActive" to isWakeWallActive())
 
+    // Lightweight state refresh omits image previews so returning to the app stays fast.
     private fun stateWithStatus(store: WakeWallStore): Map<String, Any> =
         store.state() + mapOf("wakeWallActive" to isWakeWallActive())
 

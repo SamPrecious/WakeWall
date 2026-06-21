@@ -1,5 +1,6 @@
 import 'package:flutter/services.dart';
 
+// Wraps the MethodChannel so the controller never deals with raw platform calls.
 class NativeWallpaperBridge {
   static const _channel = MethodChannel('com.zambl.wakewall/control');
   ValueChanged<ImportProgress>? _onImageImportProgress;
@@ -16,6 +17,7 @@ class NativeWallpaperBridge {
   }
 
   void _installCallbackHandler() {
+    // Android uses callbacks for long operations that start after a system picker closes.
     _channel.setMethodCallHandler((call) async {
       switch (call.method) {
         case 'imageImportStarted':

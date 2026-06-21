@@ -12,6 +12,7 @@ enum PhotoSource { askEveryTime, photos, files }
 
 enum WakeWallThemeMode { system, light, dark, midnight }
 
+// Albums are labels over wallpapers, not folders that duplicate image files.
 class WallpaperAlbum {
   const WallpaperAlbum({required this.id, required this.name});
 
@@ -19,6 +20,7 @@ class WallpaperAlbum {
   final String name;
 }
 
+// Flutter keeps preview bytes here; Android keeps the full private source image.
 class Wallpaper {
   const Wallpaper({
     required this.id,
@@ -80,6 +82,7 @@ class Wallpaper {
   );
 }
 
+// Offsets are stored as fractions of the visible phone frame, not raw pixels.
 class WallpaperCrop {
   const WallpaperCrop({this.scale = 1, this.offsetX = 0, this.offsetY = 0});
 

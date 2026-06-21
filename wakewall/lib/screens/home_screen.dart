@@ -25,6 +25,7 @@ void _wakeWallCommitHaptic() {
   HapticFeedback.mediumImpact();
 }
 
+// Picks a title colour that stays readable across dark, light, and midnight themes.
 Color _wakeWallProminentTextColor(BuildContext context) {
   final colors = context.wakeWallColors;
   if (colors.isMidnight) return colors.tealStrong;
@@ -32,6 +33,7 @@ Color _wakeWallProminentTextColor(BuildContext context) {
   return colors.onSurface;
 }
 
+// Uses the physical display when possible so previews match the actual phone shape.
 double _wakeWallPhoneRatio(BuildContext context) {
   final physicalSize = View.of(context).physicalSize;
   final displayWidth = math.min(physicalSize.width, physicalSize.height);
@@ -109,6 +111,7 @@ ScaffoldFeatureController<SnackBar, SnackBarClosedReason> _showWakeWallNotice(
 }
 
 @RoutePage()
+// The main WakeWall screen: preview, controls, albums, settings, and import flow.
 class HomeScreen extends StatefulWidget {
   const HomeScreen({required this.controller, super.key});
 
@@ -118,6 +121,7 @@ class HomeScreen extends StatefulWidget {
   State<HomeScreen> createState() => _HomeScreenState();
 }
 
+// Holds temporary UI state that should not live in the native wallpaper store.
 class _HomeScreenState extends State<HomeScreen> {
   static const importOverlayDelay = Duration(milliseconds: 350);
 
@@ -307,6 +311,7 @@ class _HomeScreenState extends State<HomeScreen> {
   }
 
   Future<void> _showSettings(BuildContext context) {
+    // Settings can be opened after Android changes state, so refresh first.
     _wakeWallTapHaptic();
     unawaited(controller.refreshState());
     return showModalBottomSheet<void>(
@@ -318,6 +323,7 @@ class _HomeScreenState extends State<HomeScreen> {
   }
 
   Future<void> _showAlbums(BuildContext context) {
+    // Album filtering is a lightweight sheet over the current home view.
     _wakeWallTapHaptic();
     return showModalBottomSheet<void>(
       context: context,
@@ -328,6 +334,7 @@ class _HomeScreenState extends State<HomeScreen> {
   }
 
   Future<void> _showCurrentWallpaperAlbums() async {
+    // The current wallpaper uses the same album picker as newly imported wallpapers.
     final wallpaper = controller.selectedWallpaper;
     if (wallpaper == null) return;
     _wakeWallTapHaptic();
@@ -347,6 +354,7 @@ class _HomeScreenState extends State<HomeScreen> {
     if (draggingWallpaper) setState(() => draggingWallpaper = false);
     final removal = await controller.removeAt(index);
     if (removal == null || !mounted) return;
+    // The snackbar is the undo window; closing it commits the native deletion.
     final notice = _showWakeWallNotice(
       context,
       message: 'Wallpaper removed',
@@ -369,6 +377,7 @@ class _HomeScreenState extends State<HomeScreen> {
         .map((wallpaper) => wallpaper.id)
         .toSet();
     var source = controller.photoSource;
+    // The source sheet only appears while the user has not picked a default.
     if (source == PhotoSource.askEveryTime) {
       final choice = await showModalBottomSheet<_AddSourceChoice>(
         context: context,
@@ -384,6 +393,7 @@ class _HomeScreenState extends State<HomeScreen> {
     Timer? overlayTimer;
     void updateImportProgress(ImportProgress progress) {
       if (mounted) setState(() => importProgress = progress);
+      // Fast imports should not flash a loading overlay for a single frame.
       overlayTimer ??= Timer(importOverlayDelay, () {
         if (mounted) setState(() => importingImages = true);
       });
@@ -423,6 +433,7 @@ class _HomeScreenState extends State<HomeScreen> {
         .toList();
     if (added.isNotEmpty && mounted) {
       Set<String> assignedAlbumIds = controller.defaultImportAlbumIds;
+      // Imported wallpapers get album choices after Android has safely stored them.
       if (controller.askAlbumsAfterImport) {
         assignedAlbumIds =
             await showModalBottomSheet<Set<String>>(
@@ -505,6 +516,7 @@ class _OperationOverlay extends StatelessWidget {
   final String description;
 
   @override
+  // Blocks the screen during longer native work so the app never looks frozen.
   Widget build(BuildContext context) {
     final colors = context.wakeWallColors;
     return Positioned.fill(
@@ -571,6 +583,7 @@ class _OperationOverlay extends StatelessWidget {
   }
 }
 
+// Top row containing the app wordmark and the two global navigation buttons.
 class _Header extends StatelessWidget {
   const _Header({required this.onAlbums, required this.onSettings});
 
@@ -619,6 +632,7 @@ class _Header extends StatelessWidget {
   }
 }
 
+// Small rounded icon button used by the home header.
 class _HeaderActionButton extends StatelessWidget {
   const _HeaderActionButton({
     required this.icon,
@@ -659,6 +673,7 @@ class _HeaderActionButton extends StatelessWidget {
   }
 }
 
+// Main phone-shaped preview card and its overlay actions.
 class _Preview extends StatelessWidget {
   const _Preview({
     required this.controller,
@@ -849,6 +864,7 @@ class _Preview extends StatelessWidget {
   }
 }
 
+// Floating pause badge that lets the user resume without entering Settings.
 class _PausedPreviewButton extends StatelessWidget {
   const _PausedPreviewButton({required this.onTap, super.key});
 
@@ -895,6 +911,7 @@ class _PausedPreviewButton extends StatelessWidget {
   }
 }
 
+// Empty-state preview that acts as one large add-wallpapers target.
 class _EmptyPreview extends StatelessWidget {
   const _EmptyPreview({required this.onAdd, super.key});
 
@@ -929,6 +946,7 @@ class _EmptyPreview extends StatelessWidget {
   }
 }
 
+// Reusable dark overlay button for actions on top of the wallpaper preview.
 class _OverlayButton extends StatelessWidget {
   const _OverlayButton({
     required this.icon,
@@ -963,6 +981,7 @@ class _OverlayButton extends StatelessWidget {
   }
 }
 
+// Horizontal queue of wallpapers plus the Add action.
 class _WallpaperStrip extends StatefulWidget {
   const _WallpaperStrip({
     required this.controller,
@@ -1009,6 +1028,7 @@ class _WallpaperStripState extends State<_WallpaperStrip> {
       return;
     }
     previousWallpaperCount = count;
+    // New imports append to the end, so the strip follows them after layout settles.
     scrollToEndAfterLayout();
   }
 
@@ -1042,6 +1062,7 @@ class _WallpaperStripState extends State<_WallpaperStrip> {
   }
 
   void previewSelection(int index) {
+    // The blue border moves before Android confirms selection.
     if (index < 0 || index >= controller.wallpapers.length) return;
     setState(() => optimisticSelectedIndex = index);
   }
@@ -1052,6 +1073,7 @@ class _WallpaperStripState extends State<_WallpaperStrip> {
 
   void commitSelection(int index) {
     final serial = ++selectionSerial;
+    // Show selection feedback immediately while Android catches up.
     previewSelection(index);
     warmPreview(index);
     unawaited(
@@ -1064,6 +1086,7 @@ class _WallpaperStripState extends State<_WallpaperStrip> {
   }
 
   void scrollToEndAfterLayout() {
+    // Wait two frames so newly added thumbnail sizes are known before scrolling.
     WidgetsBinding.instance.addPostFrameCallback((_) {
       WidgetsBinding.instance.addPostFrameCallback((_) {
         if (!mounted || !scrollController.hasClients) return;
@@ -1232,6 +1255,7 @@ class _WallpaperStripState extends State<_WallpaperStrip> {
   }
 }
 
+// Compact wallpaper preview used by the horizontal queue.
 class _WallpaperTile extends StatelessWidget {
   const _WallpaperTile({
     required this.wallpaper,
@@ -1274,6 +1298,7 @@ class _WallpaperTile extends StatelessWidget {
   }
 }
 
+// Bottom sheet for choosing which albums are visible on the home page.
 class _AlbumsSheet extends StatefulWidget {
   const _AlbumsSheet({required this.controller});
 
@@ -1298,6 +1323,7 @@ class _AlbumsSheetState extends State<_AlbumsSheet> {
     final pending = pendingActiveAlbumIds;
     if (pending != null &&
         !_sameStringSet(controller.activeAlbumIds, pending)) {
+      // If the user closes mid-debounce, still apply their last visible choice.
       Timer(const Duration(milliseconds: 220), () {
         unawaited(controller.setActiveAlbums(pending));
       });
@@ -1382,6 +1408,7 @@ class _AlbumsSheetState extends State<_AlbumsSheet> {
     setState(() => optimisticActiveAlbumIds = {...ids});
     pendingActiveAlbumIds = {...ids};
     albumApplyTimer?.cancel();
+    // Keep the sheet responsive and apply the real native filter after the tap ripple.
     albumApplyTimer = Timer(const Duration(milliseconds: 220), () {
       final pending = pendingActiveAlbumIds;
       pendingActiveAlbumIds = null;
@@ -1402,6 +1429,7 @@ class _AlbumsSheetState extends State<_AlbumsSheet> {
   }
 
   Future<void> _manageAlbum(WallpaperAlbum album) async {
+    // Long-press actions keep album management out of the main sheet.
     final action = await showModalBottomSheet<String>(
       context: context,
       builder: (context) => SafeArea(
@@ -1474,6 +1502,7 @@ class _AlbumsSheetState extends State<_AlbumsSheet> {
   }
 }
 
+// Bottom sheet for assigning one or more wallpapers to albums.
 class _AssignAlbumsSheet extends StatefulWidget {
   const _AssignAlbumsSheet({
     required this.controller,
@@ -1575,6 +1604,7 @@ class _AssignAlbumsSheetState extends State<_AssignAlbumsSheet> {
 
   Future<void> _save() async {
     _wakeWallCommitHaptic();
+    // The same selected album set is applied to every wallpaper in this sheet.
     for (final wallpaper in widget.wallpapers) {
       await widget.controller.updateWallpaperAlbums(wallpaper, selected);
     }
@@ -1585,6 +1615,7 @@ class _AssignAlbumsSheetState extends State<_AssignAlbumsSheet> {
   }
 
   Future<void> _createAlbum() async {
+    // New albums are immediately selected for this assignment flow.
     final existing = widget.controller.albums.map((album) => album.id).toSet();
     final name = await _albumNameDialog(context, title: 'New Album');
     if (name == null) return;
@@ -1601,6 +1632,7 @@ class _AssignAlbumsSheetState extends State<_AssignAlbumsSheet> {
   }
 }
 
+// Album row used by both All Wallpapers and user-created albums.
 class _AlbumFilterTile extends StatelessWidget {
   const _AlbumFilterTile({
     required this.title,
@@ -1700,6 +1732,7 @@ EdgeInsets _bottomSheetPadding(
   );
 }
 
+// Compares album sets without caring about selection order.
 bool _sameStringSet(Set<String> left, Set<String> right) {
   if (left.length != right.length) return false;
   for (final value in left) {
@@ -1708,6 +1741,7 @@ bool _sameStringSet(Set<String> left, Set<String> right) {
   return true;
 }
 
+// Shared text prompt for new album names and renames.
 Future<String?> _albumNameDialog(
   BuildContext context, {
   required String title,
@@ -1749,6 +1783,7 @@ Future<String?> _albumNameDialog(
   return result == null || result.isEmpty ? null : result;
 }
 
+// Bottom sheet for all app-wide settings and backup/restore actions.
 class _SettingsSheet extends StatefulWidget {
   const _SettingsSheet({required this.controller});
 
@@ -1932,6 +1967,7 @@ class _SettingsSheetState extends State<_SettingsSheet> {
   }
 
   Future<void> _backup(bool restore) async {
+    // Restore can wipe the current setup, so confirm only when there is data to lose.
     if (restore && controller.wallpapers.length > 1) {
       final colors = context.wakeWallColors;
       final confirmed = await showDialog<bool>(
@@ -1973,6 +2009,7 @@ class _SettingsSheetState extends State<_SettingsSheet> {
 
     String? message;
     try {
+      // The overlay timer starts only after Android confirms a file picker destination.
       message = restore
           ? await controller.restore(onOperationStarted: beginProgressDelay)
           : await controller.backup(onOperationStarted: beginProgressDelay);
@@ -2009,6 +2046,7 @@ class _SettingsSheetState extends State<_SettingsSheet> {
   }
 
   Future<void> _setWallpaperScrolling(bool enabled) async {
+    // Enabling scrolling prepares wider renders, so ask before increasing storage work.
     if (!enabled) {
       await controller.setWallpaperScrolling(false);
       return;
@@ -2052,6 +2090,7 @@ class _SettingsSheetState extends State<_SettingsSheet> {
   }
 }
 
+// Result from the Add Wallpapers source picker.
 class _AddSourceChoice {
   const _AddSourceChoice(this.source, this.remember);
 
@@ -2059,6 +2098,7 @@ class _AddSourceChoice {
   final bool remember;
 }
 
+// Lets users choose Photos or Files, optionally saving that preference.
 class _AddSourceSheet extends StatefulWidget {
   const _AddSourceSheet();
 
@@ -2118,6 +2158,7 @@ class _AddSourceSheetState extends State<_AddSourceSheet> {
   }
 }
 
+// Single source choice row inside the Add Wallpapers sheet.
 class _SourceOption extends StatelessWidget {
   const _SourceOption({
     required this.icon,
@@ -2194,6 +2235,7 @@ class _SourceOption extends StatelessWidget {
   }
 }
 
+// Shared setting card for compact segmented choices.
 class _SegmentedSetting extends StatelessWidget {
   const _SegmentedSetting({
     required this.label,
@@ -2270,6 +2312,7 @@ class _SegmentedSetting extends StatelessWidget {
   }
 }
 
+// Shared setting card for boolean options with a short explanation.
 class _SwitchTile extends StatelessWidget {
   const _SwitchTile({
     required this.label,
@@ -2328,6 +2371,7 @@ class _SwitchTile extends StatelessWidget {
   }
 }
 
+// Reusable remember-my-choice switch used by import source and album prompts.
 class _RememberChoiceTile extends StatelessWidget {
   const _RememberChoiceTile({
     required this.label,
@@ -2356,6 +2400,7 @@ class _RememberChoiceTile extends StatelessWidget {
   }
 }
 
+// Small rounded label for optional badges such as Recommended.
 class _StatusPill extends StatelessWidget {
   const _StatusPill({required this.label, required this.icon});
 

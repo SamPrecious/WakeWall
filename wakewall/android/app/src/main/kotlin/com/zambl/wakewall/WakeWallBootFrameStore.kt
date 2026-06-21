@@ -18,6 +18,7 @@ class WakeWallBootFrameStore(context: Context) {
     private val directory = File(storageContext.filesDir, "boot_frame").apply { mkdirs() }
     private val target = File(directory, "current.jpg")
 
+    // Normal app storage is unavailable until first unlock on Direct Boot devices.
     fun credentialStorageAvailable(): Boolean =
         Build.VERSION.SDK_INT < Build.VERSION_CODES.N ||
             appContext.getSystemService(UserManager::class.java)?.isUserUnlocked != false
@@ -33,6 +34,7 @@ class WakeWallBootFrameStore(context: Context) {
         val sourcePath = source.absolutePath
         val sourceLength = source.length()
         val sourceModified = source.lastModified()
+        // Avoid rewriting the boot copy when the rendered wallpaper has not changed.
         if (
             target.isFile &&
             target.length() > 0 &&

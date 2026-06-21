@@ -50,6 +50,7 @@ object WakeWallBlurRenderer {
     }
 
     private fun boxBlur(bitmap: Bitmap, radius: Int) {
+        // Two one-dimensional passes are much cheaper than sampling a full square per pixel.
         val width = bitmap.width
         val height = bitmap.height
         val source = IntArray(width * height)

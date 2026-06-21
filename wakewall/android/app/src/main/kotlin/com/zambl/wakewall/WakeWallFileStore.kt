@@ -37,6 +37,7 @@ class WakeWallFileStore(
 
     fun deleteCachedPreviews(value: String) {
         val directory = previewDirectory()
+        // Delete both stable-key and older hash-key previews from previous builds.
         PREVIEW_SUFFIXES.forEach {
             File(directory, "${storageKey(value)}_$it.jpg").delete()
             File(directory, "${value.hashCode()}_$it.jpg").delete()
@@ -44,6 +45,7 @@ class WakeWallFileStore(
     }
 
     fun cleanupOrphanedFiles() {
+        // Keep active wallpapers and pending Undo removals; everything else is abandoned.
         val retained = (activeWallpapers() + pendingRemovals()).toSet()
         val retainedLocalNames = retained.mapNotNull { localFile(it)?.name }.toSet()
         wallpaperDirectory().listFiles()?.forEach { file ->
@@ -61,6 +63,7 @@ class WakeWallFileStore(
     }
 
     fun cleanupIncompleteImports() {
+        // If an import died before entering the list, remove its private file and staging data.
         val active = activeWallpapers().toSet()
         pendingImports().forEach { value ->
             if (value !in active) deleteRemovalFiles(value)
@@ -70,6 +73,7 @@ class WakeWallFileStore(
     }
 
     fun cleanStorage(cleanupExpiredRemovals: () -> Unit): Long {
+        // Return reclaimed bytes so the UI can report that cleanup actually did work.
         val before = managedStorageBytes()
         cleanupExpiredRemovals()
         cleanupIncompleteImports()

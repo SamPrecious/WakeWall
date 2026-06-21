@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 
 @immutable
+// Carries WakeWall's custom colours through Flutter's normal Theme system.
 class WakeWallPalette extends ThemeExtension<WakeWallPalette> {
   const WakeWallPalette({
     required this.background,
@@ -149,6 +150,7 @@ abstract final class WakeWallTheme {
     required Brightness brightness,
     required WakeWallPalette colors,
   }) {
+    // Build every theme from the same shape so light/dark/midnight stay aligned.
     final scheme = brightness == Brightness.dark
         ? ColorScheme.dark(
             primary: colors.teal,

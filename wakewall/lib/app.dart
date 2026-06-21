@@ -23,6 +23,7 @@ class _WakeWallAppState extends State<WakeWallApp> with WidgetsBindingObserver {
   @override
   void initState() {
     super.initState();
+    // Tests may pass in a controller, but the real app owns the native-backed one.
     ownsController = widget.controller == null;
     controller = widget.controller ?? WakeWallController();
     controller.initialize();
@@ -58,6 +59,7 @@ class _WakeWallAppState extends State<WakeWallApp> with WidgetsBindingObserver {
             WakeWallThemeMode.midnight => ThemeMode.dark,
           },
           theme: WakeWallTheme.light,
+          // Midnight is a dark theme variant, so Flutter still treats it as dark mode.
           darkTheme: controller.themeMode == WakeWallThemeMode.midnight
               ? WakeWallTheme.midnight
               : WakeWallTheme.dark,

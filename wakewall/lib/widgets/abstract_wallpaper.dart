@@ -6,6 +6,7 @@ import 'package:flutter/material.dart';
 
 import '../models/wallpaper.dart';
 
+// Draws the same wallpaper model for the home preview, crop editor, and tiles.
 class AbstractWallpaper extends StatelessWidget {
   const AbstractWallpaper({
     required this.wallpaper,
@@ -43,6 +44,7 @@ class AbstractWallpaper extends StatelessWidget {
           final imageBytes = previewBytes ?? wallpaper.thumbnail;
           final turns = ((rotationQuarterTurns % 4) + 4) % 4;
           final rotatedSideways = turns.isOdd;
+          // Rotation swaps the rendered dimensions before crop math is applied.
           Widget memoryImage({
             required BoxFit fit,
             double? width,
@@ -74,6 +76,7 @@ class AbstractWallpaper extends StatelessWidget {
               wallpaper.imageWidth != null &&
               wallpaper.imageHeight != null;
           if (imageBytes != null && activeMode != WallpaperDisplayMode.fill) {
+            // Fit and Blur contain the whole image, then apply crop offsets inside that frame.
             final sourceWidth =
                 (rotatedSideways ? wallpaper.imageHeight : wallpaper.imageWidth)
                     ?.toDouble() ??
@@ -139,6 +142,7 @@ class AbstractWallpaper extends StatelessWidget {
             );
           }
           if (imageBytes != null && useFullSource) {
+            // Fill mode computes cover geometry from the source aspect ratio, not the widget size.
             final sourceWidth =
                 (rotatedSideways
                         ? wallpaper.imageHeight!

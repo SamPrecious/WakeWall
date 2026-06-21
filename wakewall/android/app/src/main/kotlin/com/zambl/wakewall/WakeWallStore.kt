@@ -34,6 +34,7 @@ import kotlin.math.min
 import kotlin.math.roundToInt
 import kotlin.random.Random
 
+// Owns WakeWall's durable state, image storage, previews, and backup format.
 class WakeWallStore(context: Context) {
     private val appContext = context.applicationContext
     private val prefs = appContext.getSharedPreferences("wakewall", Context.MODE_PRIVATE)
@@ -54,6 +55,7 @@ class WakeWallStore(context: Context) {
     }
 
     init {
+        // Startup is the safest time to recover from interrupted imports or Undo deletes.
         cleanupExpiredRemovals()
         cleanupIncompleteImports()
         cleanupOrphanedFiles()
@@ -123,6 +125,7 @@ class WakeWallStore(context: Context) {
             activeWallpaperSnapshot = it
         }
 
+    // Album filters are views over one wallpaper list, not separate folders.
     private fun buildActiveWallpapers(): List<String> {
             val selected = activeAlbumIds
             if (selected.isEmpty()) return wallpapers
@@ -163,6 +166,7 @@ class WakeWallStore(context: Context) {
         val currentValue = wallpaperAt(index)
         val memberships = wallpapers.associateWith(::albumIds)
         val otherAlbumIds = albums.mapTo(mutableSetOf()) { it.id } - id
+        // Only delete photos that would belong to no remaining album.
         val deleted = if (deleteExclusiveWallpapers) {
             memberships.filterValues { ids ->
                 id in ids && ids.none(otherAlbumIds::contains)
@@ -245,6 +249,7 @@ class WakeWallStore(context: Context) {
         uris.forEachIndexed { index, uri ->
             val outcome = importIntoAppStorage(uri)
             outcome.value?.let { value ->
+                // Commit each image immediately so a later crash does not hide earlier imports.
                 updated.add(value)
                 saveWallpapers(updated)
                 commitImport(value)
@@ -499,6 +504,7 @@ class WakeWallStore(context: Context) {
         rotationQuarterTurns: Int = 0,
     ) {
         val value = wallpaperAt(index) ?: return
+        // Rotation is baked into the private source; crop values stay simple afterward.
         rotateLocalSource(value, rotationQuarterTurns)
         val key = cropKey(value)
         prefs.edit()
@@ -519,6 +525,7 @@ class WakeWallStore(context: Context) {
         if (turns == 0) return true
         val original = localFile(value) ?: return false
         val decoded = decodeNormalizedBitmap(original) ?: return false
+        // Rewriting the same file keeps storage flat while previews are regenerated.
         val rotated = runCatching {
             Bitmap.createBitmap(
                 decoded,
@@ -587,6 +594,7 @@ class WakeWallStore(context: Context) {
         prefs.getInt(fitBackgroundColorKey(value), DEFAULT_FIT_BACKGROUND_COLOR)
 
     fun configuration(): Map<String, Any> {
+        // Full configuration includes preview bytes and can be expensive.
         migrateExternalImages()
         return state() + mapOf(
             "wallpapers" to activeWallpapers.mapIndexed(::wallpaperMap),
@@ -598,6 +606,7 @@ class WakeWallStore(context: Context) {
     }
 
     fun state(): Map<String, Any> {
+        // Lightweight state avoids preview bytes for frequent resume/settings refreshes.
         return mapOf(
             "index" to index,
             "paused" to paused,
@@ -677,6 +686,7 @@ class WakeWallStore(context: Context) {
 
     // Validates a backup fully before replacing the current wallpaper collection.
     fun restoreBackup(input: InputStream) {
+        // Restore is validated in a temp folder before replacing the live library.
         val restoreRoot = File(appContext.cacheDir, "restore_${UUID.randomUUID()}").apply { mkdirs() }
         try {
             var manifestText: String? = null
@@ -820,6 +830,7 @@ class WakeWallStore(context: Context) {
     private fun saveWallpapers(wallpapers: List<String>) {
         prefs.edit().putString("wallpapers", JSONArray(wallpapers).toString()).apply()
         refreshActiveWallpapers()
+        // No wallpapers means the Direct Boot emergency frame should disappear too.
         if (wallpapers.isEmpty()) bootFrameStore.clear()
     }
 
@@ -856,6 +867,7 @@ class WakeWallStore(context: Context) {
 
     // Moves older picker-based entries into the same reliable private storage.
     private fun migrateExternalImages() {
+        // Older builds stored provider URIs; modern WakeWall keeps private copies.
         var changed = false
         val imported = mutableListOf<String>()
         val migrated = wallpapers.mapNotNull { value ->
@@ -923,6 +935,7 @@ class WakeWallStore(context: Context) {
 
     // Creates the small preview Flutter displays without passing the full photo.
     private fun wallpaperMap(index: Int, value: String): Map<String, Any> {
+        // This is the only native-to-Flutter shape for a wallpaper row.
         val result = mutableMapOf<String, Any>(
             "crop" to crop(value).asMap(),
             "displayMode" to displayMode(value),
@@ -1074,6 +1087,7 @@ class WakeWallStore(context: Context) {
         val file = File(directory, "${storageKey(value)}_$suffix.jpg")
         if (file.exists()) return file
 
+        // A single renderer builds thumbnails, main previews, and live wallpaper frames.
         val metrics = appContext.resources.displayMetrics
         val screenWidth = min(metrics.widthPixels, metrics.heightPixels).coerceAtLeast(1)
         val screenHeight = max(metrics.widthPixels, metrics.heightPixels).coerceAtLeast(1)
@@ -1277,6 +1291,7 @@ class WakeWallStore(context: Context) {
     }
 
     private fun moveImportSource(source: File, destination: File): Boolean = runCatching {
+        // Prefer rename so huge originals are not copied twice during import.
         destination.delete()
         if (!source.renameTo(destination)) {
             source.copyTo(destination, overwrite = true)

@@ -88,6 +88,7 @@ class _CropEditorScreenState extends State<CropEditorScreen> {
                   );
                   final width = height * phoneRatio;
                   final rotatedSideways = rotationQuarterTurns.isOdd;
+                  // Preview rotation changes the source shape before drag limits are calculated.
                   final sourceWidth =
                       (rotatedSideways
                               ? wallpaper.imageHeight
@@ -245,6 +246,7 @@ class _CropEditorScreenState extends State<CropEditorScreen> {
   Future<void> _save() async {
     _cropCommitHaptic();
     setState(() => saving = true);
+    // Android rewrites the stored source only after Save, not while previewing.
     await widget.controller.updateCrop(
       widget.wallpaperIndex,
       crop,
@@ -269,6 +271,7 @@ class _CropEditorScreenState extends State<CropEditorScreen> {
   void _rotate() {
     _cropTapHaptic();
     setState(() {
+      // Reset crop after rotation so old offsets cannot point outside the new shape.
       rotationQuarterTurns = (rotationQuarterTurns + 1) % 4;
       crop = const WallpaperCrop();
     });
