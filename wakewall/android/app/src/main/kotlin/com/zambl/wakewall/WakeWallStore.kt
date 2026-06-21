@@ -38,6 +38,7 @@ class WakeWallStore(context: Context) {
     private val appContext = context.applicationContext
     private val prefs = appContext.getSharedPreferences("wakewall", Context.MODE_PRIVATE)
     private val transactionStore = WakeWallTransactionStore(prefs)
+    private val bootFrameStore by lazy { WakeWallBootFrameStore(appContext) }
     @Volatile
     private var activeWallpaperSnapshot: List<String>? = null
     private val fileStore by lazy {
@@ -54,6 +55,8 @@ class WakeWallStore(context: Context) {
 
     init {
         cleanupExpiredRemovals()
+        cleanupIncompleteImports()
+        cleanupOrphanedFiles()
     }
 
     var paused: Boolean
@@ -238,17 +241,17 @@ class WakeWallStore(context: Context) {
     fun addImages(uris: List<Uri>, onProgress: (Int) -> Unit = {}): ImportSummary {
         val updated = wallpapers.toMutableList()
         val failed = mutableListOf<FailedImport>()
-        val imported = uris.mapIndexedNotNull { index, uri ->
+        val imported = mutableListOf<String>()
+        uris.forEachIndexed { index, uri ->
             val outcome = importIntoAppStorage(uri)
+            outcome.value?.let { value ->
+                updated.add(value)
+                saveWallpapers(updated)
+                commitImport(value)
+                imported.add(value)
+            } ?: outcome.failure?.let(failed::add)
             onProgress(index + 1)
-            outcome.value ?: run {
-                outcome.failure?.let(failed::add)
-                null
-            }
         }
-        imported.forEach(updated::add)
-        saveWallpapers(updated)
-        imported.forEach(::commitImport)
         prefs.edit().putInt("image_format_version", 1).apply()
         return ImportSummary(imported, uris.size - imported.size, failed)
     }
@@ -270,10 +273,10 @@ class WakeWallStore(context: Context) {
             val value = promoteImport(destination, ".jpg") ?: return@forEach
             prefs.edit().putString(nameKey(value), image.name).apply()
             updated.add(value)
+            saveWallpapers(updated)
+            commitImport(value)
             imported.add(value)
         }
-        saveWallpapers(updated)
-        imported.forEach(::commitImport)
         prefs.edit().putInt("image_format_version", 1).apply()
         return imported
     }
@@ -817,6 +820,7 @@ class WakeWallStore(context: Context) {
     private fun saveWallpapers(wallpapers: List<String>) {
         prefs.edit().putString("wallpapers", JSONArray(wallpapers).toString()).apply()
         refreshActiveWallpapers()
+        if (wallpapers.isEmpty()) bootFrameStore.clear()
     }
 
     private fun jsonArrayPreference(key: String): List<String> {
@@ -1045,8 +1049,10 @@ class WakeWallStore(context: Context) {
         val directory = File(appContext.cacheDir, "wallpaper_previews")
         val suffix = if (scrolling) SCROLLING_RENDER_SUFFIX else WALLPAPER_RENDER_SUFFIX
         val file = File(directory, "${storageKey(value)}_$suffix.jpg")
-        return file.takeIf { it.isFile && it.length() > 0 }
+        val resolved = file.takeIf { it.isFile && it.length() > 0 }
             ?: ensureWallpaperRenderFile(value, scrolling)
+        if (index == this.index) bootFrameStore.saveFrom(resolved)
+        return resolved
     }
 
     // Builds wide renders before enabling scrolling so swipes never wait for image decoding.
@@ -1233,10 +1239,7 @@ class WakeWallStore(context: Context) {
                     diagnostics.add("$label:too_large")
                     return@forEach
                 }
-                if (validateOriginal(source) && runCatching {
-                        source.copyTo(destination, overwrite = true)
-                    }.isSuccess
-                ) {
+                if (validateOriginal(source) && moveImportSource(source, destination)) {
                     diagnostics.add("$label:preserved")
                     return PreserveResult(true, diagnostics.joinToString(", "))
                 }
@@ -1260,10 +1263,7 @@ class WakeWallStore(context: Context) {
                         diagnostics.add("$label:too_large")
                         return@forEach
                     }
-                    if (validateOriginal(source) && runCatching {
-                            source.copyTo(destination, overwrite = true)
-                        }.isSuccess
-                    ) {
+                    if (validateOriginal(source) && moveImportSource(source, destination)) {
                         diagnostics.add("$label:preserved")
                         return PreserveResult(true, diagnostics.joinToString(", "))
                     }
@@ -1275,6 +1275,14 @@ class WakeWallStore(context: Context) {
             source.delete()
         }
     }
+
+    private fun moveImportSource(source: File, destination: File): Boolean = runCatching {
+        destination.delete()
+        if (!source.renameTo(destination)) {
+            source.copyTo(destination, overwrite = true)
+        }
+        destination.isFile && destination.length() > 0
+    }.getOrDefault(false)
 
     // Fully decodes a bounded version before trusting copied provider bytes.
     private fun validateOriginal(source: File): Boolean {

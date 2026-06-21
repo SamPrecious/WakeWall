@@ -35,14 +35,15 @@ class WakeWallService : WallpaperService() {
 
     inner class WakeWallEngine : Engine() {
         private val handler = Handler(Looper.getMainLooper())
-        private val store = WakeWallStore(this@WakeWallService)
+        private val bootFrameStore = WakeWallBootFrameStore(this@WakeWallService)
+        private val store by lazy { WakeWallStore(this@WakeWallService) }
         private val powerManager = getSystemService(PowerManager::class.java)
         private val displayManager = getSystemService(DisplayManager::class.java)
         private val preparationExecutor = Executors.newSingleThreadExecutor()
         private var visible = false
         private var destroyed = false
         private var screenOffHandled = false
-        private var currentIndex = store.index
+        private var currentIndex = 0
         private var currentFrameIndex = -1
         private var currentFrameBitmap: Bitmap? = null
         private var preparedIndex = -1
@@ -51,12 +52,15 @@ class WakeWallService : WallpaperService() {
         private var preparingIndex = -1
         private var rebuildScheduled = false
         private var wallpaperXOffset = .5f
-        private var scrollingEnabled = store.wallpaperScrolling
+        private var scrollingEnabled = false
 
         private val rebuildRunner = Runnable {
             rebuildScheduled = false
             redrawCurrentAndPrepare()
         }
+
+        private fun unlockedStore(): WakeWallStore? =
+            if (bootFrameStore.credentialStorageAvailable()) store else null
 
         private val screenReceiver = object : BroadcastReceiver() {
             override fun onReceive(context: Context?, intent: Intent?) {
@@ -65,13 +69,21 @@ class WakeWallService : WallpaperService() {
                     Intent.ACTION_SCREEN_ON -> {
                         restoreCurrentFrame()
                         screenOffHandled = false
-                        store.recordEvent("screen_on")
+                        unlockedStore()?.recordEvent("screen_on")
                         if (visible) scheduleRebuild()
                     }
+                    Intent.ACTION_USER_UNLOCKED -> {
+                        val activeStore = unlockedStore() ?: return
+                        currentIndex = activeStore.index
+                        updateScrollingMode(activeStore)
+                        invalidateFrames()
+                        scheduleRebuild()
+                    }
                     ACTION_CONFIGURATION_UPDATED -> {
-                        store.refreshActiveWallpapers()
-                        currentIndex = store.index
-                        updateScrollingMode()
+                        val activeStore = unlockedStore() ?: return
+                        activeStore.refreshActiveWallpapers()
+                        currentIndex = activeStore.index
+                        updateScrollingMode(activeStore)
                         invalidateFrames()
                         scheduleRebuild()
                     }
@@ -85,10 +97,15 @@ class WakeWallService : WallpaperService() {
 
         override fun onCreate(surfaceHolder: SurfaceHolder) {
             super.onCreate(surfaceHolder)
+            unlockedStore()?.let { activeStore ->
+                currentIndex = activeStore.index
+                scrollingEnabled = activeStore.wallpaperScrolling
+            }
             setOffsetNotificationsEnabled(scrollingEnabled)
             val filter = IntentFilter().apply {
                 addAction(Intent.ACTION_SCREEN_ON)
                 addAction(Intent.ACTION_SCREEN_OFF)
+                addAction(Intent.ACTION_USER_UNLOCKED)
                 addAction(ACTION_CONFIGURATION_UPDATED)
                 addAction(ACTION_CROP_UPDATED)
             }
@@ -113,6 +130,10 @@ class WakeWallService : WallpaperService() {
 
         override fun onVisibilityChanged(isVisible: Boolean) {
             visible = isVisible
+            if (unlockedStore() == null) {
+                postBootFrame(allowHidden = true)
+                return
+            }
             if (!isVisible && deviceIsTurningOff()) {
                 handleScreenOff()
             } else if (isVisible || preparedBitmap == null) {
@@ -139,8 +160,8 @@ class WakeWallService : WallpaperService() {
         }
 
         // Enables launcher offset callbacks only while the user has requested scrolling.
-        private fun updateScrollingMode() {
-            val enabled = store.wallpaperScrolling
+        private fun updateScrollingMode(activeStore: WakeWallStore) {
+            val enabled = activeStore.wallpaperScrolling
             if (scrollingEnabled == enabled) return
             scrollingEnabled = enabled
             wallpaperXOffset = .5f
@@ -165,6 +186,10 @@ class WakeWallService : WallpaperService() {
             height: Int,
         ) {
             super.onSurfaceChanged(holder, format, width, height)
+            if (unlockedStore() == null) {
+                postBootFrame(allowHidden = true)
+                return
+            }
             scheduleRebuild()
         }
 
@@ -189,7 +214,13 @@ class WakeWallService : WallpaperService() {
             handler.removeCallbacks(rebuildRunner)
             rebuildScheduled = false
 
-            val nextIndex = store.advanceForScreenOff(currentIndex)
+            val activeStore = unlockedStore()
+            if (activeStore == null) {
+                postBootFrame(allowHidden = true)
+                return
+            }
+
+            val nextIndex = activeStore.advanceForScreenOff(currentIndex)
             val prepared = preparedBitmap?.takeIf {
                 preparedIndex == nextIndex &&
                     frameMatchesSurface(it)
@@ -205,7 +236,7 @@ class WakeWallService : WallpaperService() {
 
             if (prepared != null) promotePreparedFrame(nextIndex)
             currentIndex = nextIndex
-            store.recordScreenOffDraw(
+            activeStore.recordScreenOffDraw(
                 drawSucceeded = drawSucceeded,
                 usedPreparedFrame = prepared != null,
             )
@@ -214,7 +245,12 @@ class WakeWallService : WallpaperService() {
 
         // Reposts the retained frame before Android reveals the wallpaper surface.
         private fun restoreCurrentFrame() {
-            currentIndex = store.index
+            val activeStore = unlockedStore()
+            if (activeStore == null) {
+                postBootFrame(allowHidden = true)
+                return
+            }
+            currentIndex = activeStore.index
             val currentFrame = currentFrameBitmap?.takeIf {
                 currentFrameIndex == currentIndex && frameMatchesSurface(it)
             }
@@ -229,19 +265,26 @@ class WakeWallService : WallpaperService() {
 
         // Refreshes this wallpaper surface and keeps its next image ready.
         private fun redrawCurrentAndPrepare() {
-            currentIndex = store.index
-            val currentFrame = ensureCurrentFrame()
-            postFrame(
+            val activeStore = unlockedStore()
+            if (activeStore == null) {
+                postBootFrame(allowHidden = true)
+                return
+            }
+            currentIndex = activeStore.index
+            val currentFrame = ensureCurrentFrame(activeStore)
+            val drawSucceeded = postFrame(
                 index = currentIndex,
                 bitmap = currentFrame,
                 allowHidden = screenOffHandled || deviceIsTurningOff(),
             )
+            if (!drawSucceeded) postBootFrame(allowHidden = true)
             scheduleNextFramePreparation()
         }
 
         // Prepares the following wallpaper away from Android's wallpaper event thread.
         private fun scheduleNextFramePreparation() {
             if (destroyed) return
+            val activeStore = unlockedStore() ?: return
             val frame = surfaceHolder.surfaceFrame
             if (frame.width() <= 0 || frame.height() <= 0) return
 
@@ -257,7 +300,7 @@ class WakeWallService : WallpaperService() {
             }
             if (preparingIndex >= 0) return
 
-            val nextIndex = store.nextIndex(currentIndex)
+            val nextIndex = activeStore.nextIndex(currentIndex)
             if (nextIndex == currentIndex) {
                 preparedIndex = -1
                 return
@@ -283,7 +326,7 @@ class WakeWallService : WallpaperService() {
                     Bitmap.createBitmap(width, height, Bitmap.Config.ARGB_8888)
                 }.getOrNull()
                 val rendered = bitmap?.let {
-                    runCatching { drawWallpaper(Canvas(it), nextIndex) }.isSuccess
+                    runCatching { drawWallpaper(Canvas(it), nextIndex, activeStore) }.isSuccess
                 } == true
                 handler.post {
                     val stillNeeded = !destroyed &&
@@ -312,7 +355,7 @@ class WakeWallService : WallpaperService() {
         }
 
         // Renders the current wallpaper once so wake and surface recreation only copy pixels.
-        private fun ensureCurrentFrame(): Bitmap? {
+        private fun ensureCurrentFrame(activeStore: WakeWallStore): Bitmap? {
             val frame = surfaceHolder.surfaceFrame
             if (frame.width() <= 0 || frame.height() <= 0) return null
 
@@ -336,7 +379,7 @@ class WakeWallService : WallpaperService() {
                     Bitmap.createBitmap(frameBufferWidth(frame.width()), frame.height(), Bitmap.Config.ARGB_8888)
                 }.getOrNull()
                 ?: return null
-            drawWallpaper(Canvas(bitmap), currentIndex)
+            drawWallpaper(Canvas(bitmap), currentIndex, activeStore)
             if (bitmap !== existing) {
                 currentFrameBitmap?.takeUnless { it.isRecycled }?.recycle()
             }
@@ -387,7 +430,12 @@ class WakeWallService : WallpaperService() {
                     if (bitmap != null) {
                         drawCachedFrame(canvas, bitmap, index)
                     } else {
-                        drawWallpaper(canvas, index)
+                        val activeStore = unlockedStore()
+                        if (activeStore != null) {
+                            drawWallpaper(canvas, index, activeStore)
+                        } else {
+                            if (!drawBootFrame(canvas)) return false
+                        }
                     }
                     drewFrame = true
                 }
@@ -401,13 +449,58 @@ class WakeWallService : WallpaperService() {
             }
         }
 
+        // Uses the last saved frame while Android is still locked after a restart.
+        private fun postBootFrame(allowHidden: Boolean): Boolean {
+            if (!visible && !allowHidden) return false
+            var canvas: Canvas? = null
+            var drewFrame = false
+            try {
+                canvas = lockSurfaceCanvas(useHardware = true)
+                if (canvas != null) drewFrame = drawBootFrame(canvas)
+            } catch (_: Exception) {
+                drewFrame = false
+            } finally {
+                val posted = canvas != null && runCatching {
+                    surfaceHolder.unlockCanvasAndPost(canvas)
+                }.isSuccess
+                return drewFrame && posted
+            }
+        }
+
+        private fun drawBootFrame(canvas: Canvas): Boolean {
+            val file = bootFrameStore.frameFile() ?: return false
+            val bitmap = BitmapFactory.decodeFile(file.absolutePath) ?: return false
+            return try {
+                val width = canvas.width.toFloat()
+                val height = canvas.height.toFloat()
+                val scale = max(width / bitmap.width, height / bitmap.height)
+                val drawnWidth = bitmap.width * scale
+                val drawnHeight = bitmap.height * scale
+                canvas.drawColor(Color.BLACK)
+                canvas.drawBitmap(
+                    bitmap,
+                    null,
+                    RectF(
+                        (width - drawnWidth) / 2f,
+                        (height - drawnHeight) / 2f,
+                        (width + drawnWidth) / 2f,
+                        (height + drawnHeight) / 2f,
+                    ),
+                    Paint(Paint.ANTI_ALIAS_FLAG or Paint.FILTER_BITMAP_FLAG or Paint.DITHER_FLAG),
+                )
+                true
+            } finally {
+                bitmap.recycle()
+            }
+        }
+
         // Copies the visible launcher viewport from a prepared wide frame.
         private fun drawCachedFrame(canvas: Canvas, bitmap: Bitmap, index: Int) {
             if (!scrollingEnabled || bitmap.width <= canvas.width) {
                 canvas.drawBitmap(bitmap, 0f, 0f, null)
                 return
             }
-            val displayMode = store.displayMode(index)
+            val displayMode = unlockedStore()?.displayMode(index) ?: "fill"
             // Keeps bordered compositions centred instead of exposing uneven edges.
             val visibleOffset = if (displayMode == "fill") {
                 wallpaperXOffset
@@ -436,23 +529,28 @@ class WakeWallService : WallpaperService() {
         }
 
         // Draws either a selected photo or one of the bundled samples.
-        private fun drawWallpaper(canvas: Canvas, index: Int) {
-            val entry = store.wallpaperAt(index)
+        private fun drawWallpaper(canvas: Canvas, index: Int, activeStore: WakeWallStore) {
+            val entry = activeStore.wallpaperAt(index)
             if (entry == null) {
                 canvas.drawColor(Color.BLACK)
                 return
             }
             if (!entry.startsWith("sample:")) {
-                if (!drawPhoto(canvas, index, entry)) canvas.drawColor(Color.BLACK)
+                if (!drawPhoto(canvas, index, entry, activeStore)) canvas.drawColor(Color.BLACK)
                 return
             }
-            drawSample(canvas, entry.removePrefix("sample:").toIntOrNull() ?: index, index)
+            drawSample(canvas, entry.removePrefix("sample:").toIntOrNull() ?: index, index, activeStore)
         }
 
-        private fun drawPhoto(canvas: Canvas, index: Int, uriValue: String): Boolean {
+        private fun drawPhoto(
+            canvas: Canvas,
+            index: Int,
+            uriValue: String,
+            activeStore: WakeWallStore,
+        ): Boolean {
             val width = canvas.width.toFloat()
             val height = canvas.height.toFloat()
-            val rendered = store.wallpaperRenderFile(index, scrollingEnabled)?.let {
+            val rendered = activeStore.wallpaperRenderFile(index, scrollingEnabled)?.let {
                 BitmapFactory.decodeFile(it.absolutePath)
             }
             if (rendered != null && rendered.width > 0 && rendered.height > 0) {
@@ -479,17 +577,18 @@ class WakeWallService : WallpaperService() {
                 }
                 rendered.recycle()
             }
-            val crop = store.crop(index)
-            val displayMode = store.displayMode(index)
+            val crop = activeStore.crop(index)
+            val displayMode = activeStore.displayMode(index)
             val bitmap = decodePhoto(
                 uriValue,
                 canvas.width,
                 canvas.height,
                 crop.scale,
                 displayMode,
+                activeStore,
             ) ?: return false
             canvas.drawColor(
-                if (displayMode == "fit") store.fitBackgroundColor(index)
+                if (displayMode == "fit") activeStore.fitBackgroundColor(index)
                 else Color.rgb(32, 33, 36),
             )
             if (displayMode == "blur") WakeWallBlurRenderer.draw(canvas, bitmap, width, height)
@@ -541,9 +640,10 @@ class WakeWallService : WallpaperService() {
             targetHeight: Int,
             cropScale: Float,
             displayMode: String,
+            activeStore: WakeWallStore,
         ): Bitmap? {
             return runCatching {
-                val localFile = store.localFile(uriValue)
+                val localFile = activeStore.localFile(uriValue)
                 if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P) {
                     val source = if (localFile != null) {
                         ImageDecoder.createSource(localFile)
@@ -570,16 +670,21 @@ class WakeWallService : WallpaperService() {
                         decoder.allocator = ImageDecoder.ALLOCATOR_SOFTWARE
                     }
                 } else {
-                    store.openImage(uriValue)?.use(BitmapFactory::decodeStream)
+                    activeStore.openImage(uriValue)?.use(BitmapFactory::decodeStream)
                 }
             }.getOrNull()
         }
 
         // Builds one of the bundled sample wallpapers directly onto the surface.
-        private fun drawSample(canvas: Canvas, sampleIndex: Int, cropIndex: Int) {
+        private fun drawSample(
+            canvas: Canvas,
+            sampleIndex: Int,
+            cropIndex: Int,
+            activeStore: WakeWallStore,
+        ) {
             val width = canvas.width.toFloat()
             val height = canvas.height.toFloat()
-            val crop = store.crop(cropIndex)
+            val crop = activeStore.crop(cropIndex)
             canvas.save()
             applyCrop(canvas, crop, width, height)
             val palettes = arrayOf(
