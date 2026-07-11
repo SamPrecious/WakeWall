@@ -123,6 +123,7 @@ class NativeWallpaperBridge {
     required String fit,
     required String themeMode,
     required bool wallpaperScrolling,
+    required bool ultraHighResolutionMode,
   }) async {
     await _channel.invokeMethod<void>('updateSettings', {
       'paused': paused,
@@ -130,6 +131,7 @@ class NativeWallpaperBridge {
       'fit': fit,
       'themeMode': themeMode,
       'wallpaperScrolling': wallpaperScrolling,
+      'ultraHighResolutionMode': ultraHighResolutionMode,
     });
   }
 

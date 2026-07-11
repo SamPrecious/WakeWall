@@ -2,6 +2,7 @@ import 'dart:convert';
 import 'dart:async';
 
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:wakewall/app.dart';
 import 'package:wakewall/controllers/wakewall_controller.dart';
@@ -11,6 +12,17 @@ import 'package:wakewall/theme/wakewall_theme.dart';
 import 'package:wakewall/widgets/abstract_wallpaper.dart';
 
 void main() {
+  test('native action errors notify controller listeners', () async {
+    final controller = WakeWallController(bridge: _PlatformFailureBridge());
+    var notifications = 0;
+    controller.addListener(() => notifications++);
+
+    await controller.openWallpaperPicker();
+
+    expect(controller.lastNativeError, 'Test platform failure.');
+    expect(notifications, 1);
+  });
+
   testWidgets('WakeWall starts with an empty collection', (tester) async {
     final controller = WakeWallController(bridge: _EmptyBridge());
     await tester.pumpWidget(WakeWallApp(controller: controller));
@@ -143,6 +155,8 @@ void main() {
     expect(find.text('Dark'), findsOneWidget);
     expect(find.text('Midnight'), findsOneWidget);
     expect(find.text('Fit mode'), findsNothing);
+    expect(find.text('Ultra High Resolution'), findsOneWidget);
+    expect(find.text('Experimental'), findsOneWidget);
     expect(find.text('Backup'), findsOneWidget);
     expect(find.text('Restore'), findsOneWidget);
     expect(find.text('Use WakeWall'), findsOneWidget);
@@ -162,6 +176,20 @@ void main() {
 
     expect(find.text('WakeWall Is Active'), findsOneWidget);
     expect(find.text('Use WakeWall'), findsNothing);
+  });
+
+  testWidgets('tapping a switch card toggles the setting', (tester) async {
+    final bridge = _ScrollingSettingsBridge();
+    final controller = WakeWallController(bridge: bridge);
+    await tester.pumpWidget(WakeWallApp(controller: controller));
+    await tester.pumpAndSettle();
+
+    await tester.tap(find.byTooltip('Settings'));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('Pause WakeWall'));
+    await tester.pumpAndSettle();
+
+    expect(controller.paused, isTrue);
   });
 
   testWidgets('theme setting defaults to system and can be changed', (
@@ -206,7 +234,7 @@ void main() {
     await tester.pumpAndSettle();
     await tester.ensureVisible(find.text('Wallpaper Scrolling'));
     await tester.pumpAndSettle();
-    await tester.tap(find.byType(Switch).last);
+    await tester.tap(find.text('Wallpaper Scrolling'));
     await tester.pumpAndSettle();
 
     expect(find.text('Enable Wallpaper Scrolling?'), findsOneWidget);
@@ -217,6 +245,32 @@ void main() {
     await tester.pumpAndSettle();
     expect(controller.wallpaperScrolling, isTrue);
     expect(bridge.wallpaperScrolling, isTrue);
+  });
+
+  testWidgets('ultra high resolution mode warns before enabling', (
+    tester,
+  ) async {
+    final bridge = _ScrollingSettingsBridge();
+    final controller = WakeWallController(bridge: bridge);
+    await tester.pumpWidget(WakeWallApp(controller: controller));
+    await tester.pumpAndSettle();
+
+    expect(controller.ultraHighResolutionMode, isFalse);
+    await tester.tap(find.byTooltip('Settings'));
+    await tester.pumpAndSettle();
+    await tester.ensureVisible(find.text('Ultra High Resolution'));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('Ultra High Resolution'));
+    await tester.pumpAndSettle();
+
+    expect(find.text('Enable Ultra High Resolution?'), findsOneWidget);
+    expect(controller.ultraHighResolutionMode, isFalse);
+    expect(bridge.ultraHighResolutionMode, isFalse);
+
+    await tester.tap(find.text('Enable'));
+    await tester.pumpAndSettle();
+    expect(controller.ultraHighResolutionMode, isTrue);
+    expect(bridge.ultraHighResolutionMode, isTrue);
   });
 
   testWidgets('backup progress waits until a save location is confirmed', (
@@ -292,6 +346,7 @@ void main() {
     expect(find.text('WakeWall'), findsOneWidget);
     expect(find.text('Up Next'), findsOneWidget);
     expect(find.text('Add'), findsOneWidget);
+    expect(find.byIcon(Icons.skip_next_rounded), findsOneWidget);
 
     final firstThumbnail = tester.getSize(
       find.byKey(const ValueKey('wallpaper-thumbnail-tidal')),
@@ -314,6 +369,22 @@ void main() {
       closeTo(tester.getTopLeft(find.text('Up Next')).dx, 0.1),
     );
     expect(find.bySemanticsLabel('Tidal, wallpaper 1 of 4'), findsOneWidget);
+  });
+
+  testWidgets('short screens scroll instead of overflowing', (tester) async {
+    await tester.binding.setSurfaceSize(const Size(800, 360));
+    addTearDown(() => tester.binding.setSurfaceSize(null));
+    final controller = WakeWallController(bridge: _PopulatedBridge());
+
+    await tester.pumpWidget(WakeWallApp(controller: controller));
+    await tester.pumpAndSettle();
+
+    expect(
+      find.byKey(const ValueKey('short-screen-home-scroll')),
+      findsOneWidget,
+    );
+    expect(find.text('WakeWall'), findsOneWidget);
+    expect(tester.takeException(), isNull);
   });
 
   testWidgets('large preview keeps a complete landscape source available', (
@@ -347,6 +418,47 @@ void main() {
 
     expect(tester.takeException(), isNull);
     expect(tester.widget<Image>(find.byType(Image)).fit, BoxFit.cover);
+  });
+
+  testWidgets('damaged preview bytes show a clear fallback', (tester) async {
+    final wallpaper = Wallpaper(
+      id: 'damaged',
+      name: 'Damaged',
+      palette: const [Colors.black, Colors.black, Colors.white],
+      style: 0,
+      uri: 'local:damaged.jpg',
+      thumbnail: Uint8List.fromList([0, 1, 2, 3]),
+    );
+
+    await tester.pumpWidget(
+      MaterialApp(
+        home: SizedBox(
+          width: 200,
+          height: 400,
+          child: AbstractWallpaper(wallpaper: wallpaper),
+        ),
+      ),
+    );
+    await tester.pump();
+
+    expect(find.byIcon(Icons.broken_image_outlined), findsOneWidget);
+    expect(tester.takeException(), isNull);
+  });
+
+  testWidgets('album management is available without a long press', (
+    tester,
+  ) async {
+    final controller = WakeWallController(bridge: _AlbumBridge());
+    await tester.pumpWidget(WakeWallApp(controller: controller));
+    await tester.pumpAndSettle();
+
+    await tester.tap(find.byTooltip('Albums'));
+    await tester.pumpAndSettle();
+    await tester.tap(find.byTooltip('Manage Space'));
+    await tester.pumpAndSettle();
+
+    expect(find.text('Rename'), findsOneWidget);
+    expect(find.text('Delete Album'), findsOneWidget);
   });
 
   testWidgets('holding a wallpaper reveals the remove target', (tester) async {
@@ -464,11 +576,17 @@ void main() {
     expect(find.text('Fill'), findsOneWidget);
     expect(find.text('Fit'), findsOneWidget);
     expect(find.text('Blur'), findsOneWidget);
-    expect(find.text('Pinch to zoom | Drag to position'), findsOneWidget);
+    expect(find.text('Pinch to zoom · Drag to position'), findsOneWidget);
     expect(find.byTooltip('Rotate wallpaper'), findsOneWidget);
+    expect(
+      tester
+          .widget<AnimatedOpacity>(find.byKey(const ValueKey('crop-grid')))
+          .opacity,
+      0,
+    );
 
     final center = tester.getCenter(
-      find.text('Pinch to zoom | Drag to position'),
+      find.text('Pinch to zoom · Drag to position'),
     );
     final firstFinger = await tester.createGesture(pointer: 1);
     final secondFinger = await tester.createGesture(pointer: 2);
@@ -477,9 +595,21 @@ void main() {
     await firstFinger.moveTo(center.translate(-90, -400));
     await secondFinger.moveTo(center.translate(90, -400));
     await tester.pump();
+    expect(
+      tester
+          .widget<AnimatedOpacity>(find.byKey(const ValueKey('crop-grid')))
+          .opacity,
+      1,
+    );
     await firstFinger.up();
     await secondFinger.up();
     await tester.pumpAndSettle();
+    expect(
+      tester
+          .widget<AnimatedOpacity>(find.byKey(const ValueKey('crop-grid')))
+          .opacity,
+      0,
+    );
 
     expect(find.byTooltip('Reset wallpaper'), findsOneWidget);
     await tester.tap(find.byTooltip('Rotate wallpaper'));
@@ -489,6 +619,24 @@ void main() {
     await tester.pumpAndSettle();
     expect(find.text('Adjust Wallpaper'), findsNothing);
     expect(find.byTooltip('Adjust Crop'), findsOneWidget);
+  });
+
+  testWidgets('a failed crop save stays open and explains the problem', (
+    tester,
+  ) async {
+    final controller = WakeWallController(bridge: _CropFailureBridge());
+    await tester.pumpWidget(WakeWallApp(controller: controller));
+    await tester.pumpAndSettle();
+
+    await tester.tap(find.byTooltip('Adjust Crop'));
+    await tester.pumpAndSettle();
+    await tester.tap(find.byKey(const ValueKey('crop-editor-save')));
+    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 200));
+
+    expect(find.text('Adjust Wallpaper'), findsOneWidget);
+    expect(find.text('Crop save failed.'), findsOneWidget);
+    expect(find.byKey(const ValueKey('crop-editor-saving')), findsNothing);
   });
 }
 
@@ -501,6 +649,16 @@ class _EmptyBridge extends NativeWallpaperBridge {
     'fit': 'cropToFill',
     'wallpapers': const [],
   };
+}
+
+class _PlatformFailureBridge extends _EmptyBridge {
+  @override
+  Future<void> openWallpaperPicker() {
+    throw PlatformException(
+      code: 'test_failure',
+      message: 'Test platform failure.',
+    );
+  }
 }
 
 class _PopulatedBridge extends _EmptyBridge {
@@ -559,6 +717,32 @@ class _PopulatedBridge extends _EmptyBridge {
   }
 }
 
+class _AlbumBridge extends _PopulatedBridge {
+  @override
+  Future<Map<String, Object?>> configuration() async => {
+    ...await super.configuration(),
+    'albums': const [
+      {'id': 'space', 'name': 'Space'},
+    ],
+    'activeAlbumIds': const <String>[],
+  };
+}
+
+class _CropFailureBridge extends _PopulatedBridge {
+  @override
+  Future<Map<String, Object?>> updateCrop({
+    required int index,
+    required double scale,
+    required double offsetX,
+    required double offsetY,
+    required String displayMode,
+    required int fitBackgroundColor,
+    required int rotationQuarterTurns,
+  }) {
+    throw PlatformException(code: 'crop_failure', message: 'Crop save failed.');
+  }
+}
+
 class _ActiveBridge extends _EmptyBridge {
   @override
   Future<Map<String, Object?>> configuration() async => {
@@ -572,6 +756,7 @@ class _ActiveBridge extends _EmptyBridge {
 
 class _ScrollingSettingsBridge extends _EmptyBridge {
   bool wallpaperScrolling = false;
+  bool ultraHighResolutionMode = false;
 
   @override
   Future<void> updateSettings({
@@ -580,8 +765,10 @@ class _ScrollingSettingsBridge extends _EmptyBridge {
     required String fit,
     required String themeMode,
     required bool wallpaperScrolling,
+    required bool ultraHighResolutionMode,
   }) async {
     this.wallpaperScrolling = wallpaperScrolling;
+    this.ultraHighResolutionMode = ultraHighResolutionMode;
   }
 }
 
@@ -595,6 +782,7 @@ class _ThemeSettingsBridge extends _EmptyBridge {
     required String fit,
     required String themeMode,
     required bool wallpaperScrolling,
+    required bool ultraHighResolutionMode,
   }) async {
     this.themeMode = themeMode;
   }

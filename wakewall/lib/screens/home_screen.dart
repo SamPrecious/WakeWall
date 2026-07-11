@@ -11,10 +11,8 @@ import '../navigation/app_router.dart';
 import '../services/native_wallpaper_bridge.dart';
 import '../theme/wakewall_theme.dart';
 import '../widgets/abstract_wallpaper.dart';
+import '../widgets/wakewall_notice.dart';
 
-const _noticeVisibleDuration = Duration(milliseconds: 2800);
-const _noticeEnterDuration = Duration(milliseconds: 320);
-const _noticeExitDuration = Duration(milliseconds: 260);
 const _wallpaperStripHeaderHeight = 34.0;
 
 void _wakeWallTapHaptic() {
@@ -43,71 +41,6 @@ double _wakeWallPhoneRatio(BuildContext context) {
   }
   final screen = MediaQuery.sizeOf(context);
   return (screen.width / screen.height).clamp(.44, .62).toDouble();
-}
-
-// Shows every short app message with the same compact Android-style layout.
-ScaffoldFeatureController<SnackBar, SnackBarClosedReason> _showWakeWallNotice(
-  BuildContext context, {
-  required String message,
-  required IconData icon,
-  Color? iconColor,
-  String? actionLabel,
-  VoidCallback? onAction,
-}) {
-  final colors = context.wakeWallColors;
-  final messenger = ScaffoldMessenger.of(context);
-  final screenWidth = MediaQuery.sizeOf(context).width;
-  final bottomSafeArea = MediaQuery.viewPaddingOf(context).bottom;
-  final horizontalMargin = math.max(28.0, (screenWidth - 330) / 2);
-  final bottomMargin = math.max(28.0, bottomSafeArea + 24);
-  messenger.hideCurrentSnackBar();
-  final notice = messenger.showSnackBar(
-    SnackBar(
-      behavior: SnackBarBehavior.floating,
-      margin: EdgeInsets.fromLTRB(
-        horizontalMargin,
-        0,
-        horizontalMargin,
-        bottomMargin,
-      ),
-      duration: _noticeVisibleDuration,
-      padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
-      dismissDirection: DismissDirection.down,
-      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(999)),
-      content: Row(
-        mainAxisSize: MainAxisSize.min,
-        children: [
-          Icon(icon, color: iconColor ?? colors.muted, size: 18),
-          const SizedBox(width: 10),
-          Expanded(child: Text(message)),
-        ],
-      ),
-      action: actionLabel == null
-          ? null
-          : SnackBarAction(
-              label: actionLabel,
-              textColor: colors.tealStrong,
-              onPressed: () {
-                _wakeWallTapHaptic();
-                (onAction ?? () {})();
-              },
-            ),
-    ),
-    snackBarAnimationStyle: const AnimationStyle(
-      duration: _noticeEnterDuration,
-      reverseDuration: _noticeExitDuration,
-    ),
-  );
-  Timer? timeout;
-  if (actionLabel != null) {
-    timeout = Timer(_noticeVisibleDuration, () {
-      if (context.mounted) {
-        messenger.hideCurrentSnackBar(reason: SnackBarClosedReason.timeout);
-      }
-    });
-  }
-  notice.closed.whenComplete(() => timeout?.cancel());
-  return notice;
 }
 
 @RoutePage()
@@ -174,8 +107,12 @@ class _HomeScreenState extends State<HomeScreen> {
         if (bytes == null) continue;
         final cacheKey = '${wallpaper.id}:${identityHashCode(bytes)}';
         if (warmedPreviews.contains(cacheKey)) continue;
-        await precacheImage(MemoryImage(bytes), context);
         warmedPreviews.add(cacheKey);
+        try {
+          await precacheImage(MemoryImage(bytes), context);
+        } catch (_) {
+          // A damaged cache can still be replaced by the normal image error path.
+        }
         if (!mounted) return;
       }
     });
@@ -221,15 +158,32 @@ class _HomeScreenState extends State<HomeScreen> {
                               .toDouble()
                         : 0.0;
                     // Reserve the collection first so navigation bars cannot squash it.
+                    final landscape =
+                        constraints.maxWidth > constraints.maxHeight;
+                    final previewMinimum = controller.hasWallpapers
+                        ? landscape
+                              ? 370.0
+                              : 260.0
+                        : 320.0;
                     final previewHeight = (usableHeight - collectionHeight)
-                        .clamp(controller.hasWallpapers ? 260.0 : 320.0, 680.0)
+                        .clamp(previewMinimum, 680.0)
                         .toDouble();
+                    final contentHeight =
+                        headerHeight +
+                        previewHeight +
+                        collectionHeight +
+                        bottomGap;
+                    final needsVerticalScroll =
+                        contentHeight > constraints.maxHeight;
 
-                    return Padding(
+                    final content = Padding(
                       padding: EdgeInsets.symmetric(
                         horizontal: horizontalPadding,
                       ),
                       child: Column(
+                        mainAxisSize: needsVerticalScroll
+                            ? MainAxisSize.min
+                            : MainAxisSize.max,
                         children: [
                           SizedBox(
                             height: headerHeight,
@@ -290,6 +244,13 @@ class _HomeScreenState extends State<HomeScreen> {
                           SizedBox(height: bottomGap),
                         ],
                       ),
+                    );
+                    if (!needsVerticalScroll) return content;
+                    // Landscape and unusually short windows scroll instead of overflowing.
+                    return SingleChildScrollView(
+                      key: const ValueKey('short-screen-home-scroll'),
+                      physics: const ClampingScrollPhysics(),
+                      child: content,
                     );
                   },
                 ),
@@ -355,7 +316,7 @@ class _HomeScreenState extends State<HomeScreen> {
     final removal = await controller.removeAt(index);
     if (removal == null || !mounted) return;
     // The snackbar is the undo window; closing it commits the native deletion.
-    final notice = _showWakeWallNotice(
+    final notice = showWakeWallNotice(
       context,
       message: 'Wallpaper removed',
       icon: Icons.delete_outline_rounded,
@@ -419,7 +380,7 @@ class _HomeScreenState extends State<HomeScreen> {
 
     if (!mounted) return;
     if (controller.lastNativeError != null) {
-      _showWakeWallNotice(
+      showWakeWallNotice(
         context,
         message: controller.lastNativeError!,
         icon: Icons.error_outline_rounded,
@@ -650,22 +611,28 @@ class _HeaderActionButton extends StatelessWidget {
     final iconColor = colors.isMidnight ? colors.tealStrong : colors.teal;
     return Tooltip(
       message: tooltip,
-      child: Material(
-        color: Colors.transparent,
-        borderRadius: BorderRadius.circular(13),
-        child: InkWell(
-          onTap: onTap,
+      child: SizedBox(
+        width: 48,
+        height: 48,
+        child: Material(
+          color: Colors.transparent,
           borderRadius: BorderRadius.circular(13),
-          child: AnimatedContainer(
-            duration: const Duration(milliseconds: 160),
-            curve: Curves.easeOut,
-            width: 40,
-            height: 40,
-            decoration: BoxDecoration(
-              borderRadius: BorderRadius.circular(13),
-              border: Border.all(color: Colors.transparent),
+          child: InkWell(
+            onTap: onTap,
+            borderRadius: BorderRadius.circular(13),
+            child: Center(
+              child: AnimatedContainer(
+                duration: const Duration(milliseconds: 160),
+                curve: Curves.easeOut,
+                width: 40,
+                height: 40,
+                decoration: BoxDecoration(
+                  borderRadius: BorderRadius.circular(13),
+                  border: Border.all(color: Colors.transparent),
+                ),
+                child: Icon(icon, color: iconColor, size: 22),
+              ),
             ),
-            child: Icon(icon, color: iconColor, size: 22),
           ),
         ),
       ),
@@ -797,7 +764,7 @@ class _Preview extends StatelessWidget {
                                   ),
                                   const SizedBox(width: 8),
                                   _OverlayButton(
-                                    icon: Icons.shuffle_rounded,
+                                    icon: Icons.skip_next_rounded,
                                     tooltip: 'Next Wallpaper',
                                     onTap: () {
                                       _wakeWallTapHaptic();
@@ -1321,12 +1288,11 @@ class _AlbumsSheetState extends State<_AlbumsSheet> {
   void dispose() {
     albumApplyTimer?.cancel();
     final pending = pendingActiveAlbumIds;
+    pendingActiveAlbumIds = null;
     if (pending != null &&
         !_sameStringSet(controller.activeAlbumIds, pending)) {
       // If the user closes mid-debounce, still apply their last visible choice.
-      Timer(const Duration(milliseconds: 220), () {
-        unawaited(controller.setActiveAlbums(pending));
-      });
+      unawaited(controller.setActiveAlbums(pending));
     }
     super.dispose();
   }
@@ -1382,6 +1348,7 @@ class _AlbumsSheetState extends State<_AlbumsSheet> {
               selected: visibleActiveAlbumIds.contains(album.id),
               onTap: () => _toggle(album.id),
               onLongPress: () => _manageAlbum(album),
+              onManage: () => _manageAlbum(album),
             ),
           if (controller.albums.isEmpty) ...[
             const SizedBox(height: 16),
@@ -1640,12 +1607,14 @@ class _AlbumFilterTile extends StatelessWidget {
     required this.selected,
     required this.onTap,
     this.onLongPress,
+    this.onManage,
   });
   final String title;
   final IconData icon;
   final bool selected;
   final VoidCallback onTap;
   final VoidCallback? onLongPress;
+  final VoidCallback? onManage;
 
   @override
   Widget build(BuildContext context) {
@@ -1707,6 +1676,27 @@ class _AlbumFilterTile extends StatelessWidget {
                       color: selected ? colors.tealStrong : colors.muted,
                     ),
                   ),
+                  if (onManage != null) ...[
+                    const SizedBox(width: 4),
+                    IconButton(
+                      tooltip: 'Manage $title',
+                      visualDensity: VisualDensity.compact,
+                      constraints: const BoxConstraints.tightFor(
+                        width: 40,
+                        height: 40,
+                      ),
+                      padding: EdgeInsets.zero,
+                      onPressed: () {
+                        _wakeWallTapHaptic();
+                        onManage!();
+                      },
+                      icon: Icon(
+                        Icons.more_vert_rounded,
+                        color: colors.muted,
+                        size: 21,
+                      ),
+                    ),
+                  ],
                 ],
               ),
             ),
@@ -1858,25 +1848,6 @@ class _SettingsSheetState extends State<_SettingsSheet> {
                     ),
                   ),
                   const SizedBox(height: 10),
-                  _SegmentedSetting(
-                    label: 'Photo Source',
-                    icon: Icons.add_photo_alternate_outlined,
-                    options: const ['Ask', 'Photos', 'Files'],
-                    selectedIndex: controller.photoSource.index,
-                    onSelected: (index) =>
-                        controller.setPhotoSource(PhotoSource.values[index]),
-                  ),
-                  const SizedBox(height: 10),
-                  _SwitchTile(
-                    label: 'Choose Albums After Import',
-                    description: 'Ask where new wallpapers should be added',
-                    value: controller.askAlbumsAfterImport,
-                    onChanged: (value) => controller.setImportAlbumPreference(
-                      value,
-                      controller.defaultImportAlbumIds,
-                    ),
-                  ),
-                  const SizedBox(height: 10),
                   _SwitchTile(
                     label: 'Pause WakeWall',
                     description: 'Keep the current wallpaper in place',
@@ -1899,6 +1870,33 @@ class _SettingsSheetState extends State<_SettingsSheet> {
                     description: 'Move the wallpaper as you swipe Home screens',
                     value: controller.wallpaperScrolling,
                     onChanged: _setWallpaperScrolling,
+                  ),
+                  const SizedBox(height: 10),
+                  _SegmentedSetting(
+                    label: 'Photo Source',
+                    icon: Icons.add_photo_alternate_outlined,
+                    options: const ['Ask', 'Photos', 'Files'],
+                    selectedIndex: controller.photoSource.index,
+                    onSelected: (index) =>
+                        controller.setPhotoSource(PhotoSource.values[index]),
+                  ),
+                  const SizedBox(height: 10),
+                  _SwitchTile(
+                    label: 'Choose Albums After Import',
+                    description: 'Ask where new wallpapers should be added',
+                    value: controller.askAlbumsAfterImport,
+                    onChanged: (value) => controller.setImportAlbumPreference(
+                      value,
+                      controller.defaultImportAlbumIds,
+                    ),
+                  ),
+                  const SizedBox(height: 10),
+                  _SwitchTile(
+                    label: 'Ultra High Resolution',
+                    description: 'Skip import caps for very large new photos',
+                    badge: 'Experimental',
+                    value: controller.ultraHighResolutionMode,
+                    onChanged: _setUltraHighResolutionMode,
                   ),
                   const SizedBox(height: 20),
                   Row(
@@ -2026,7 +2024,7 @@ class _SettingsSheetState extends State<_SettingsSheet> {
     if (!mounted) return;
     final text = controller.lastNativeError ?? message;
     if (text != null) {
-      _showWakeWallNotice(
+      showWakeWallNotice(
         context,
         message: text,
         icon: controller.lastNativeError == null
@@ -2080,6 +2078,44 @@ class _SettingsSheetState extends State<_SettingsSheet> {
     );
     if (confirmed == true && mounted) {
       await controller.setWallpaperScrolling(true);
+    }
+  }
+
+  Future<void> _setUltraHighResolutionMode(bool enabled) async {
+    // Ultra mode keeps future imports larger, so make the storage risk explicit.
+    if (!enabled) {
+      await controller.setUltraHighResolutionMode(false);
+      return;
+    }
+    final colors = context.wakeWallColors;
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (context) => AlertDialog(
+        backgroundColor: colors.surface,
+        title: const Text('Enable Ultra High Resolution?'),
+        content: const Text(
+          'WakeWall will stop optimizing very large new photos down to the normal 8192px and 200MB safety caps. This is experimental and can use more storage, slow imports, or be less stable on some devices.',
+        ),
+        actions: [
+          TextButton(
+            onPressed: () {
+              _wakeWallTapHaptic();
+              Navigator.pop(context, false);
+            },
+            child: const Text('Cancel'),
+          ),
+          FilledButton(
+            onPressed: () {
+              _wakeWallCommitHaptic();
+              Navigator.pop(context, true);
+            },
+            child: const Text('Enable'),
+          ),
+        ],
+      ),
+    );
+    if (confirmed == true && mounted) {
+      await controller.setUltraHighResolutionMode(true);
     }
   }
 
@@ -2319,53 +2355,72 @@ class _SwitchTile extends StatelessWidget {
     required this.description,
     required this.value,
     required this.onChanged,
+    this.badge,
   });
 
   final String label;
   final String description;
   final bool value;
   final ValueChanged<bool> onChanged;
+  final String? badge;
 
   @override
   Widget build(BuildContext context) {
     final colors = context.wakeWallColors;
     final labelColor = _wakeWallProminentTextColor(context);
-    return Container(
-      padding: const EdgeInsets.all(14),
-      decoration: BoxDecoration(
+    void toggle(bool next) {
+      if (next != value) _wakeWallTapHaptic();
+      onChanged(next);
+    }
+
+    return MergeSemantics(
+      child: Material(
         color: colors.background,
         borderRadius: BorderRadius.circular(10),
-      ),
-      child: Row(
-        children: [
-          Expanded(
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
+        child: InkWell(
+          onTap: () => toggle(!value),
+          borderRadius: BorderRadius.circular(10),
+          child: Padding(
+            padding: const EdgeInsets.all(14),
+            child: Row(
               children: [
-                Text(
-                  label,
-                  style: Theme.of(
-                    context,
-                  ).textTheme.labelLarge?.copyWith(color: labelColor),
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Wrap(
+                        spacing: 8,
+                        runSpacing: 4,
+                        crossAxisAlignment: WrapCrossAlignment.center,
+                        children: [
+                          Text(
+                            label,
+                            style: Theme.of(
+                              context,
+                            ).textTheme.labelLarge?.copyWith(color: labelColor),
+                          ),
+                          if (badge != null)
+                            _StatusPill(
+                              label: badge!,
+                              icon: Icons.science_outlined,
+                            ),
+                        ],
+                      ),
+                      const SizedBox(height: 3),
+                      Text(
+                        description,
+                        style: Theme.of(
+                          context,
+                        ).textTheme.bodySmall?.copyWith(color: colors.muted),
+                      ),
+                    ],
+                  ),
                 ),
-                const SizedBox(height: 3),
-                Text(
-                  description,
-                  style: Theme.of(
-                    context,
-                  ).textTheme.bodySmall?.copyWith(color: colors.muted),
-                ),
+                Switch(value: value, onChanged: toggle),
               ],
             ),
           ),
-          Switch(
-            value: value,
-            onChanged: (next) {
-              if (next != value) _wakeWallTapHaptic();
-              onChanged(next);
-            },
-          ),
-        ],
+        ),
       ),
     );
   }

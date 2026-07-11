@@ -8,6 +8,7 @@ import '../controllers/wakewall_controller.dart';
 import '../models/wallpaper.dart';
 import '../theme/wakewall_theme.dart';
 import '../widgets/abstract_wallpaper.dart';
+import '../widgets/wakewall_notice.dart';
 
 void _cropTapHaptic() {
   HapticFeedback.selectionClick();
@@ -41,6 +42,7 @@ class _CropEditorScreenState extends State<CropEditorScreen> {
   Offset gestureStartFocalPoint = Offset.zero;
   double gestureStartX = 0;
   double gestureStartY = 0;
+  bool cropGridVisible = false;
   bool saving = false;
 
   Wallpaper get wallpaper =>
@@ -110,6 +112,9 @@ class _CropEditorScreenState extends State<CropEditorScreen> {
                       child: GestureDetector(
                         behavior: HitTestBehavior.opaque,
                         onScaleStart: (details) {
+                          if (!cropGridVisible) {
+                            setState(() => cropGridVisible = true);
+                          }
                           gestureStartScale = crop.scale;
                           gestureStartFocalPoint = details.focalPoint;
                           gestureStartX = crop.offsetX;
@@ -155,6 +160,11 @@ class _CropEditorScreenState extends State<CropEditorScreen> {
                             );
                           });
                         },
+                        onScaleEnd: (_) {
+                          if (cropGridVisible) {
+                            setState(() => cropGridVisible = false);
+                          }
+                        },
                         child: ExcludeSemantics(
                           child: Stack(
                             children: [
@@ -173,9 +183,27 @@ class _CropEditorScreenState extends State<CropEditorScreen> {
                               ),
                               Positioned.fill(
                                 child: IgnorePointer(
-                                  child: CustomPaint(
-                                    painter: _CropGridPainter(
-                                      context.wakeWallColors.teal,
+                                  child: DecoratedBox(
+                                    decoration: BoxDecoration(
+                                      borderRadius: BorderRadius.circular(18),
+                                      border: Border.all(
+                                        color: context.wakeWallColors.teal
+                                            .withValues(alpha: .7),
+                                        width: 2,
+                                      ),
+                                    ),
+                                  ),
+                                ),
+                              ),
+                              Positioned.fill(
+                                child: IgnorePointer(
+                                  child: AnimatedOpacity(
+                                    key: const ValueKey('crop-grid'),
+                                    duration: const Duration(milliseconds: 180),
+                                    curve: Curves.easeOut,
+                                    opacity: cropGridVisible ? 1 : 0,
+                                    child: const CustomPaint(
+                                      painter: _CropGridPainter(),
                                     ),
                                   ),
                                 ),
@@ -244,10 +272,11 @@ class _CropEditorScreenState extends State<CropEditorScreen> {
   }
 
   Future<void> _save() async {
+    if (saving) return;
     _cropCommitHaptic();
     setState(() => saving = true);
     // Android rewrites the stored source only after Save, not while previewing.
-    await widget.controller.updateCrop(
+    final saved = await widget.controller.updateCrop(
       widget.wallpaperIndex,
       crop,
       displayMode: displayMode,
@@ -255,6 +284,18 @@ class _CropEditorScreenState extends State<CropEditorScreen> {
       rotationQuarterTurns: rotationQuarterTurns,
     );
     if (!mounted) return;
+    if (!saved) {
+      setState(() => saving = false);
+      showWakeWallNotice(
+        context,
+        message:
+            widget.controller.lastNativeError ??
+            'WakeWall could not save those changes.',
+        icon: Icons.error_outline_rounded,
+        iconColor: context.wakeWallColors.danger,
+      );
+      return;
+    }
     context.router.pop();
   }
 
@@ -291,11 +332,10 @@ class _EditorHeader extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final colors = context.wakeWallColors;
     final compactButtonStyle = TextButton.styleFrom(
-      minimumSize: const Size(0, 40),
+      minimumSize: const Size(48, 48),
       padding: const EdgeInsets.symmetric(horizontal: 8),
-      tapTargetSize: MaterialTapTargetSize.shrinkWrap,
-      visualDensity: VisualDensity.compact,
     );
 
     return Padding(
@@ -326,7 +366,7 @@ class _EditorHeader extends StatelessWidget {
               child: TextButton(
                 key: const ValueKey('crop-editor-cancel'),
                 style: compactButtonStyle,
-                onPressed: onCancel,
+                onPressed: saving ? null : onCancel,
                 child: const Text('Cancel'),
               ),
             ),
@@ -336,7 +376,30 @@ class _EditorHeader extends StatelessWidget {
                 key: const ValueKey('crop-editor-save'),
                 style: compactButtonStyle,
                 onPressed: saving ? null : onSave,
-                child: Text(saving ? 'Saving' : 'Save'),
+                child: AnimatedSwitcher(
+                  duration: const Duration(milliseconds: 140),
+                  child: saving
+                      ? Row(
+                          key: const ValueKey('crop-editor-saving'),
+                          mainAxisSize: MainAxisSize.min,
+                          children: [
+                            SizedBox(
+                              width: 14,
+                              height: 14,
+                              child: CircularProgressIndicator(
+                                strokeWidth: 2,
+                                color: colors.muted,
+                              ),
+                            ),
+                            const SizedBox(width: 6),
+                            const Text('Saving'),
+                          ],
+                        )
+                      : const Text(
+                          'Save',
+                          key: ValueKey('crop-editor-save-label'),
+                        ),
+                ),
               ),
             ),
           ],
@@ -365,7 +428,7 @@ class _EditorFooter extends StatelessWidget {
   Widget build(BuildContext context) {
     final colors = context.wakeWallColors;
     return Padding(
-      padding: const EdgeInsets.fromLTRB(24, 8, 24, 22),
+      padding: const EdgeInsets.fromLTRB(24, 8, 24, 6),
       child: Column(
         children: [
           SizedBox(
@@ -396,7 +459,7 @@ class _EditorFooter extends StatelessWidget {
           ),
           const SizedBox(height: 12),
           SizedBox(
-            height: 32,
+            height: 48,
             child: displayMode == WallpaperDisplayMode.fit
                 ? _FitBackgroundSelector(
                     selected: fitBackgroundColor,
@@ -409,8 +472,8 @@ class _EditorFooter extends StatelessWidget {
                       const SizedBox(width: 8),
                       Text(
                         crop.isDefault
-                            ? 'Pinch to zoom | Drag to position'
-                            : '${crop.scale.toStringAsFixed(1)}x zoom | Drag to position',
+                            ? 'Pinch to zoom · Drag to position'
+                            : '${crop.scale.toStringAsFixed(1)}x zoom · Drag to position',
                         style: Theme.of(
                           context,
                         ).textTheme.bodyMedium?.copyWith(color: colors.muted),
@@ -464,14 +527,14 @@ class _FitBackgroundSelector extends StatelessWidget {
     required this.onSelected,
   });
 
-  static const colors = [
-    Color(0xFF202124),
-    Color(0xFF000000),
-    Color(0xFFE8EAED),
-    Color(0xFF182230),
-    Color(0xFF183029),
-    Color(0xFF3A2026),
-    Color(0xFF3A2C22),
+  static const swatches = [
+    (color: Color(0xFF202124), name: 'Charcoal'),
+    (color: Color(0xFF000000), name: 'Black'),
+    (color: Color(0xFFE8EAED), name: 'Light Grey'),
+    (color: Color(0xFF182230), name: 'Navy'),
+    (color: Color(0xFF183029), name: 'Forest'),
+    (color: Color(0xFF3A2026), name: 'Burgundy'),
+    (color: Color(0xFF3A2C22), name: 'Brown'),
   ];
 
   final Color selected;
@@ -482,52 +545,64 @@ class _FitBackgroundSelector extends StatelessWidget {
     final themeColors = context.wakeWallColors;
     return Semantics(
       label: 'Fit background colour',
-      child: FittedBox(
-        fit: BoxFit.scaleDown,
-        child: Row(
-          mainAxisAlignment: MainAxisAlignment.center,
-          children: [
-            Text(
-              'Border',
-              style: Theme.of(
-                context,
-              ).textTheme.bodyMedium?.copyWith(color: themeColors.muted),
-            ),
-            const SizedBox(width: 12),
-            for (final color in colors)
-              Padding(
-                padding: const EdgeInsets.symmetric(horizontal: 4),
-                child: InkWell(
-                  customBorder: const CircleBorder(),
-                  onTap: () => onSelected(color),
-                  child: AnimatedContainer(
-                    duration: const Duration(milliseconds: 160),
-                    width: 28,
-                    height: 28,
-                    decoration: BoxDecoration(
-                      color: color,
-                      shape: BoxShape.circle,
-                      border: Border.all(
-                        color: color == selected
-                            ? themeColors.tealStrong
-                            : themeColors.outline,
-                        width: color == selected ? 3 : 1,
+      child: Row(
+        children: [
+          Text(
+            'Border',
+            style: Theme.of(
+              context,
+            ).textTheme.bodyMedium?.copyWith(color: themeColors.muted),
+          ),
+          const SizedBox(width: 8),
+          Expanded(
+            child: Row(
+              children: [
+                for (final swatch in swatches)
+                  Expanded(
+                    child: Tooltip(
+                      message: swatch.name,
+                      child: Semantics(
+                        button: true,
+                        selected: swatch.color == selected,
+                        label: '${swatch.name} border',
+                        child: Material(
+                          color: Colors.transparent,
+                          child: InkWell(
+                            customBorder: const CircleBorder(),
+                            onTap: () => onSelected(swatch.color),
+                            child: Center(
+                              child: AnimatedContainer(
+                                duration: const Duration(milliseconds: 160),
+                                width: 28,
+                                height: 28,
+                                decoration: BoxDecoration(
+                                  color: swatch.color,
+                                  shape: BoxShape.circle,
+                                  border: Border.all(
+                                    color: swatch.color == selected
+                                        ? themeColors.tealStrong
+                                        : themeColors.outline,
+                                    width: swatch.color == selected ? 3 : 1,
+                                  ),
+                                ),
+                              ),
+                            ),
+                          ),
+                        ),
                       ),
                     ),
                   ),
-                ),
-              ),
-          ],
-        ),
+              ],
+            ),
+          ),
+        ],
       ),
     );
   }
 }
 
 class _CropGridPainter extends CustomPainter {
-  const _CropGridPainter(this.accent);
-
-  final Color accent;
+  const _CropGridPainter();
 
   @override
   void paint(Canvas canvas, Size size) {
@@ -555,16 +630,8 @@ class _CropGridPainter extends CustomPainter {
       Offset(size.width, size.height * 2 / 3),
       paint,
     );
-    canvas.drawRRect(
-      RRect.fromRectAndRadius(Offset.zero & size, const Radius.circular(18)),
-      Paint()
-        ..color = accent.withValues(alpha: .7)
-        ..style = PaintingStyle.stroke
-        ..strokeWidth = 2,
-    );
   }
 
   @override
-  bool shouldRepaint(covariant _CropGridPainter oldDelegate) =>
-      oldDelegate.accent != accent;
+  bool shouldRepaint(covariant _CropGridPainter oldDelegate) => false;
 }

@@ -14,22 +14,25 @@ object WakeWallBlurRenderer {
         val blurWidth = max(1, (width / DOWNSAMPLE).roundToInt())
         val blurHeight = max(1, (height / DOWNSAMPLE).roundToInt())
         val backdrop = Bitmap.createBitmap(blurWidth, blurHeight, Bitmap.Config.ARGB_8888)
-        val backdropCanvas = Canvas(backdrop)
-        backdropCanvas.drawBitmap(
-            source,
-            coverRect(source.width, source.height, blurWidth.toFloat(), blurHeight.toFloat()),
-            RectF(0f, 0f, blurWidth.toFloat(), blurHeight.toFloat()),
-            Paint(Paint.ANTI_ALIAS_FLAG or Paint.FILTER_BITMAP_FLAG or Paint.DITHER_FLAG),
-        )
+        try {
+            val backdropCanvas = Canvas(backdrop)
+            backdropCanvas.drawBitmap(
+                source,
+                coverRect(source.width, source.height, blurWidth.toFloat(), blurHeight.toFloat()),
+                RectF(0f, 0f, blurWidth.toFloat(), blurHeight.toFloat()),
+                Paint(Paint.ANTI_ALIAS_FLAG or Paint.FILTER_BITMAP_FLAG or Paint.DITHER_FLAG),
+            )
 
-        repeat(BLUR_PASSES) { boxBlur(backdrop, BLUR_RADIUS) }
-        canvas.drawBitmap(
-            backdrop,
-            null,
-            RectF(0f, 0f, width, height),
-            Paint(Paint.ANTI_ALIAS_FLAG or Paint.FILTER_BITMAP_FLAG or Paint.DITHER_FLAG),
-        )
-        backdrop.recycle()
+            repeat(BLUR_PASSES) { boxBlur(backdrop, BLUR_RADIUS) }
+            canvas.drawBitmap(
+                backdrop,
+                null,
+                RectF(0f, 0f, width, height),
+                Paint(Paint.ANTI_ALIAS_FLAG or Paint.FILTER_BITMAP_FLAG or Paint.DITHER_FLAG),
+            )
+        } finally {
+            backdrop.recycle()
+        }
     }
 
     private fun coverRect(

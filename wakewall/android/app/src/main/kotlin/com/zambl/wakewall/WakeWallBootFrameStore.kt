@@ -3,6 +3,7 @@ package com.zambl.wakewall
 import android.content.Context
 import android.os.Build
 import android.os.UserManager
+import android.system.Os
 import java.io.File
 
 // Keeps one already-rendered frame available before Android unlocks normal app storage.
@@ -26,10 +27,10 @@ class WakeWallBootFrameStore(context: Context) {
     fun frameFile(): File? =
         target.takeIf { it.isFile && it.length() > 0 }
 
-    fun saveFrom(source: File?): Boolean {
+    fun saveFrom(source: File?): Boolean = synchronized(LOCK) {
         if (source?.isFile != true || source.length() <= 0) {
             clear()
-            return false
+            return@synchronized false
         }
         val sourcePath = source.absolutePath
         val sourceLength = source.length()
@@ -42,31 +43,36 @@ class WakeWallBootFrameStore(context: Context) {
             prefs.getLong("source_length", -1) == sourceLength &&
             prefs.getLong("source_modified", -1) == sourceModified
         ) {
-            return true
+            return@synchronized true
         }
 
         val temp = File(directory, "current.tmp")
         val saved = runCatching {
             source.copyTo(temp, overwrite = true)
-            if (!temp.renameTo(target)) temp.copyTo(target, overwrite = true)
-            temp.delete()
-            true
+            check(temp.length() == sourceLength)
+            // POSIX rename replaces the old frame atomically on Android's local filesystem.
+            Os.rename(temp.absolutePath, target.absolutePath)
+            target.isFile && target.length() == sourceLength
         }.getOrDefault(false)
+        temp.delete()
         if (!saved) {
-            temp.delete()
-            return false
+            return@synchronized false
         }
         prefs.edit()
             .putString("source_path", sourcePath)
             .putLong("source_length", sourceLength)
             .putLong("source_modified", sourceModified)
             .apply()
-        return true
+        true
     }
 
-    fun clear() {
+    fun clear() = synchronized(LOCK) {
         File(directory, "current.tmp").delete()
         target.delete()
         prefs.edit().clear().apply()
+    }
+
+    companion object {
+        private val LOCK = Any()
     }
 }

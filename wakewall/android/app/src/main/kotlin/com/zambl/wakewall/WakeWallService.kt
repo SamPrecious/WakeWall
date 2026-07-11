@@ -70,7 +70,6 @@ class WakeWallService : WallpaperService() {
                     Intent.ACTION_SCREEN_ON -> {
                         restoreCurrentFrame()
                         screenOffHandled = false
-                        unlockedStore()?.recordEvent("screen_on")
                         if (visible) scheduleRebuild()
                     }
                     Intent.ACTION_USER_UNLOCKED -> {
@@ -231,7 +230,7 @@ class WakeWallService : WallpaperService() {
             val currentFrame = currentFrameBitmap?.takeIf {
                 currentFrameIndex == nextIndex && frameMatchesSurface(it)
             }
-            val drawSucceeded = postFrame(
+            postFrame(
                 index = nextIndex,
                 bitmap = prepared ?: currentFrame,
                 allowHidden = true,
@@ -239,10 +238,6 @@ class WakeWallService : WallpaperService() {
 
             if (prepared != null) promotePreparedFrame(nextIndex)
             currentIndex = nextIndex
-            activeStore.recordScreenOffDraw(
-                drawSucceeded = drawSucceeded,
-                usedPreparedFrame = prepared != null,
-            )
             scheduleNextFramePreparation()
         }
 

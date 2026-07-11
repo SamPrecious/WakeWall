@@ -54,13 +54,6 @@ class WakeWallStore(context: Context) {
         )
     }
 
-    init {
-        // Startup is the safest time to recover from interrupted imports or Undo deletes.
-        cleanupExpiredRemovals()
-        cleanupIncompleteImports()
-        cleanupOrphanedFiles()
-    }
-
     var paused: Boolean
         get() = prefs.getBoolean("paused", false)
         set(value) = prefs.edit().putBoolean("paused", value).apply()
@@ -76,6 +69,10 @@ class WakeWallStore(context: Context) {
     var wallpaperScrolling: Boolean
         get() = prefs.getBoolean("wallpaper_scrolling", false)
         set(value) = prefs.edit().putBoolean("wallpaper_scrolling", value).apply()
+
+    var ultraHighResolutionMode: Boolean
+        get() = prefs.getBoolean("ultra_high_resolution_mode", false)
+        set(value) = prefs.edit().putBoolean("ultra_high_resolution_mode", value).apply()
 
     var photoSource: String
         get() = prefs.getString("photo_source", "askEveryTime") ?: "askEveryTime"
@@ -127,12 +124,12 @@ class WakeWallStore(context: Context) {
 
     // Album filters are views over one wallpaper list, not separate folders.
     private fun buildActiveWallpapers(): List<String> {
-            val selected = activeAlbumIds
-            if (selected.isEmpty()) return wallpapers
-            return wallpapers.filter { value ->
-                val memberships = albumIds(value)
-                memberships.any(selected::contains)
-            }
+        val selected = activeAlbumIds
+        if (selected.isEmpty()) return wallpapers
+        return wallpapers.filter { value ->
+            val memberships = albumIds(value)
+            memberships.any(selected::contains)
+        }
     }
 
     fun refreshActiveWallpapers() {
@@ -228,6 +225,7 @@ class WakeWallStore(context: Context) {
         fit: String,
         themeMode: String,
         wallpaperScrolling: Boolean,
+        ultraHighResolutionMode: Boolean,
     ) {
         prefs.edit()
             .putBoolean("paused", paused)
@@ -235,6 +233,7 @@ class WakeWallStore(context: Context) {
             .putString("fit", fit)
             .putString("theme_mode", normalizedThemeMode(themeMode))
             .putBoolean("wallpaper_scrolling", wallpaperScrolling)
+            .putBoolean("ultra_high_resolution_mode", ultraHighResolutionMode)
             .apply()
     }
 
@@ -246,8 +245,9 @@ class WakeWallStore(context: Context) {
         val updated = wallpapers.toMutableList()
         val failed = mutableListOf<FailedImport>()
         val imported = mutableListOf<String>()
+        val enforceImportCaps = !ultraHighResolutionMode
         uris.forEachIndexed { index, uri ->
-            val outcome = importIntoAppStorage(uri)
+            val outcome = importIntoAppStorage(uri, enforceImportCaps)
             outcome.value?.let { value ->
                 // Commit each image immediately so a later crash does not hide earlier imports.
                 updated.add(value)
@@ -269,7 +269,8 @@ class WakeWallStore(context: Context) {
             val destination = File(importStagingDirectory(), "${UUID.randomUUID()}.jpg")
             val saved = runCatching {
                 destination.writeBytes(image.bytes)
-                imageDimensions(destination) != null
+                imageDimensions(destination) != null &&
+                    (ultraHighResolutionMode || fitsNormalImportCaps(destination))
             }.getOrDefault(false)
             if (!saved) {
                 destination.delete()
@@ -464,36 +465,6 @@ class WakeWallStore(context: Context) {
         next
     }
 
-    // Records whether this wallpaper surface displayed the shared screen-off target.
-    fun recordScreenOffDraw(drawSucceeded: Boolean, usedPreparedFrame: Boolean) {
-        val now = System.currentTimeMillis()
-        prefs.edit()
-            .putString("last_event", "screen_off")
-            .putLong("last_event_at", now)
-            .putInt("screen_off_count", prefs.getInt("screen_off_count", 0) + 1)
-            .putString("last_draw_reason", "screen_off_prepare")
-            .putBoolean("last_draw_succeeded", drawSucceeded)
-            .putBoolean("last_screen_off_used_prepared_frame", usedPreparedFrame)
-            .putInt(
-                "screen_off_${if (usedPreparedFrame) "prepared" else "fallback"}_count",
-                prefs.getInt("screen_off_${if (usedPreparedFrame) "prepared" else "fallback"}_count", 0) + 1,
-            )
-            .putLong("last_draw_at", now)
-            .putInt(
-                "screen_off_prepare_${if (drawSucceeded) "success" else "failure"}_count",
-                prefs.getInt("screen_off_prepare_${if (drawSucceeded) "success" else "failure"}_count", 0) + 1,
-            )
-            .apply()
-    }
-
-    fun recordEvent(event: String) {
-        prefs.edit()
-            .putString("last_event", event)
-            .putLong("last_event_at", System.currentTimeMillis())
-            .putInt("${event}_count", prefs.getInt("${event}_count", 0) + 1)
-            .apply()
-    }
-
     fun setCrop(
         index: Int,
         scale: Double,
@@ -613,6 +584,7 @@ class WakeWallStore(context: Context) {
             "shuffle" to shuffle,
             "fit" to fit,
             "wallpaperScrolling" to wallpaperScrolling,
+            "ultraHighResolutionMode" to ultraHighResolutionMode,
             "photoSource" to photoSource,
             "themeMode" to themeMode,
             "albums" to albums.map(WallpaperAlbum::asMap),
@@ -642,12 +614,20 @@ class WakeWallStore(context: Context) {
             "This collection is too large to back up."
         }
         val manifestWallpapers = JSONArray()
+        var archivedBytes = 0L
         ZipOutputStream(output.buffered()).use { zip ->
             saved.forEachIndexed { index, value ->
                 val source = localFile(value)
                     ?: throw IllegalStateException("A wallpaper could not be read.")
+                require(source.isFile && source.length() > 0) {
+                    "A wallpaper could not be read."
+                }
                 require(source.length() <= MAX_BACKUP_IMAGE_BYTES) {
                     "A wallpaper is too large to back up."
+                }
+                archivedBytes += source.length()
+                require(archivedBytes <= MAX_BACKUP_TOTAL_BYTES) {
+                    "This collection is too large to back up."
                 }
                 val entryName = "images/$index.image"
                 zip.putNextEntry(ZipEntry(entryName))
@@ -671,6 +651,7 @@ class WakeWallStore(context: Context) {
                 .put("shuffle", shuffle)
                 .put("fit", fit)
                 .put("wallpaperScrolling", wallpaperScrolling)
+                .put("ultraHighResolutionMode", ultraHighResolutionMode)
                 .put("photoSource", photoSource)
                 .put("themeMode", themeMode)
                 .put("albums", JSONArray(albums.map { JSONObject(it.asMap()) }))
@@ -770,8 +751,8 @@ class WakeWallStore(context: Context) {
             val newValues = try {
                 restored.map { restoredWallpaper ->
                     val destination = File(wallpaperDirectory, "${UUID.randomUUID()}.image")
-                    restoredWallpaper.source.copyTo(destination)
                     createdFiles.add(destination)
+                    restoredWallpaper.source.copyTo(destination)
                     "$LOCAL_PREFIX${destination.name}"
                 }
             } catch (error: Exception) {
@@ -786,6 +767,10 @@ class WakeWallStore(context: Context) {
                 .putBoolean("shuffle", manifest.optBoolean("shuffle", true))
                 .putString("fit", manifest.optString("fit", "cropToFill"))
                 .putBoolean("wallpaper_scrolling", manifest.optBoolean("wallpaperScrolling", false))
+                .putBoolean(
+                    "ultra_high_resolution_mode",
+                    manifest.optBoolean("ultraHighResolutionMode", false),
+                )
                 .putString("photo_source", manifest.optString("photoSource", "askEveryTime"))
                 .putString("theme_mode", normalizedThemeMode(manifest.optString("themeMode", THEME_MODE_SYSTEM)))
                 .putString("albums", JSONArray(restoredAlbums.map { JSONObject(it.asMap()) }).toString())
@@ -817,7 +802,18 @@ class WakeWallStore(context: Context) {
                     .putInt(fitBackgroundColorKey(value), restoredWallpaper.fitBackgroundColor)
                     .putString(albumKey(value), JSONArray(restoredWallpaper.albumIds.toList()).toString())
             }
-            editor.apply()
+            val committed = try {
+                editor.commit()
+            } catch (error: Exception) {
+                createdFiles.forEach(File::delete)
+                throw error
+            }
+            if (!committed) {
+                createdFiles.forEach(File::delete)
+                error("WakeWall could not save the restored backup.")
+            }
+            refreshActiveWallpapers()
+            if (newValues.isEmpty()) bootFrameStore.clear()
             oldValues.forEach { value ->
                 localFile(value)?.delete()
                 deleteCachedPreviews(value)
@@ -879,7 +875,7 @@ class WakeWallStore(context: Context) {
             } else if (value.startsWith(LOCAL_PREFIX)) {
                 value
             } else {
-                importIntoAppStorage(Uri.parse(value)).value?.also {
+                importIntoAppStorage(Uri.parse(value), enforceImportCaps = false).value?.also {
                     changed = true
                     imported.add(it)
                 } ?: value
@@ -986,18 +982,21 @@ class WakeWallStore(context: Context) {
     private fun fullAspectPreview(value: String, maxEdge: Float): Bitmap? {
         val file = localFile(value)
         return runCatching {
-            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P && file != null) {
-                ImageDecoder.decodeBitmap(ImageDecoder.createSource(file)) { decoder, info, _ ->
-                    val scale = (maxEdge / max(info.size.width, info.size.height).toFloat())
-                        .coerceAtMost(1f)
-                    decoder.setTargetSize(
-                        max(1, (info.size.width * scale).roundToInt()),
-                        max(1, (info.size.height * scale).roundToInt()),
-                    )
-                    decoder.allocator = ImageDecoder.ALLOCATOR_SOFTWARE
+            when {
+                Build.VERSION.SDK_INT >= Build.VERSION_CODES.P && file != null -> {
+                    ImageDecoder.decodeBitmap(ImageDecoder.createSource(file)) { decoder, info, _ ->
+                        val scale = (maxEdge / max(info.size.width, info.size.height).toFloat())
+                            .coerceAtMost(1f)
+                        decoder.setTargetSize(
+                            max(1, (info.size.width * scale).roundToInt()),
+                            max(1, (info.size.height * scale).roundToInt()),
+                        )
+                        decoder.allocator = ImageDecoder.ALLOCATOR_SOFTWARE
+                    }
                 }
-            } else {
-                openImage(value)?.use(BitmapFactory::decodeStream)
+
+                file != null -> decodeWithBitmapFactory(file, maxEdge)
+                else -> openImage(value)?.use(BitmapFactory::decodeStream)
             }
         }.getOrNull()
     }
@@ -1006,13 +1005,18 @@ class WakeWallStore(context: Context) {
     private fun cachedSourcePreview(value: String): ByteArray? {
         val directory = File(appContext.cacheDir, "wallpaper_previews").apply { mkdirs() }
         val file = File(directory, "${storageKey(value)}_source.jpg")
-        if (file.exists()) return runCatching { file.readBytes() }.getOrNull()
+        if (file.isFile && file.length() > 0) return runCatching { file.readBytes() }.getOrNull()
+        file.delete()
         val bitmap = fullAspectPreview(value, SOURCE_PREVIEW_EDGE) ?: return null
-        val saved = runCatching {
-            file.outputStream().use { bitmap.compress(Bitmap.CompressFormat.JPEG, 94, it) }
-        }.getOrDefault(false)
-        bitmap.recycle()
-        return if (saved) runCatching { file.readBytes() }.getOrNull() else null
+        return try {
+            if (writeBitmapCache(bitmap, file, 94)) {
+                runCatching { file.readBytes() }.getOrNull()
+            } else {
+                null
+            }
+        } finally {
+            bitmap.recycle()
+        }
     }
 
     // Saves a screen-shaped crop snapshot so Flutter can display it immediately.
@@ -1085,7 +1089,8 @@ class WakeWallStore(context: Context) {
     ): File? {
         val directory = File(appContext.cacheDir, "wallpaper_previews").apply { mkdirs() }
         val file = File(directory, "${storageKey(value)}_$suffix.jpg")
-        if (file.exists()) return file
+        if (file.isFile && file.length() > 0) return file
+        file.delete()
 
         // A single renderer builds thumbnails, main previews, and live wallpaper frames.
         val metrics = appContext.resources.displayMetrics
@@ -1100,60 +1105,83 @@ class WakeWallStore(context: Context) {
             (max(targetWidth, outputHeight) * crop.scale.coerceIn(1f, 4f))
                 .coerceAtMost(MAX_IMAGE_EDGE),
         ) ?: return null
-        val snapshot = Bitmap.createBitmap(targetWidth, outputHeight, Bitmap.Config.ARGB_8888)
-        val canvas = Canvas(snapshot)
-        canvas.drawColor(
-            if (displayMode == DISPLAY_MODE_FIT) fitBackgroundColor(value)
-            else DEFAULT_FIT_BACKGROUND_COLOR,
-        )
+        var snapshot: Bitmap? = null
+        return try {
+            val rendered = Bitmap.createBitmap(targetWidth, outputHeight, Bitmap.Config.ARGB_8888)
+            snapshot = rendered
+            val canvas = Canvas(rendered)
+            canvas.drawColor(
+                if (displayMode == DISPLAY_MODE_FIT) fitBackgroundColor(value)
+                else DEFAULT_FIT_BACKGROUND_COLOR,
+            )
 
-        val width = targetWidth.toFloat()
-        val height = outputHeight.toFloat()
-        val foregroundViewportWidth = scrollingViewportWidth
-            ?.takeIf { displayMode != DISPLAY_MODE_FILL }
-            ?.toFloat()
-            ?: width
-        val scale = if (displayMode == DISPLAY_MODE_FILL) {
-            max(width / source.width, height / source.height)
-        } else {
-            min(foregroundViewportWidth / source.width, height / source.height)
+            val width = targetWidth.toFloat()
+            val height = outputHeight.toFloat()
+            val foregroundViewportWidth = scrollingViewportWidth
+                ?.takeIf { displayMode != DISPLAY_MODE_FILL }
+                ?.toFloat()
+                ?: width
+            val scale = if (displayMode == DISPLAY_MODE_FILL) {
+                max(width / source.width, height / source.height)
+            } else {
+                min(foregroundViewportWidth / source.width, height / source.height)
+            }
+            val drawnWidth = source.width * scale
+            val drawnHeight = source.height * scale
+            if (displayMode == DISPLAY_MODE_BLUR) {
+                WakeWallBlurRenderer.draw(canvas, source, width, height)
+            }
+            val maxOffsetX = max(
+                0f,
+                (drawnWidth * crop.scale - foregroundViewportWidth) / (2f * foregroundViewportWidth),
+            )
+            val maxOffsetY = max(0f, (drawnHeight * crop.scale - height) / (2f * height))
+            canvas.save()
+            canvas.translate(
+                width / 2f +
+                    crop.offsetX.coerceIn(-maxOffsetX, maxOffsetX) * foregroundViewportWidth,
+                height / 2f + crop.offsetY.coerceIn(-maxOffsetY, maxOffsetY) * height,
+            )
+            canvas.scale(crop.scale, crop.scale)
+            canvas.translate(-width / 2f, -height / 2f)
+            canvas.drawBitmap(
+                source,
+                null,
+                android.graphics.RectF(
+                    (width - drawnWidth) / 2f,
+                    (height - drawnHeight) / 2f,
+                    (width + drawnWidth) / 2f,
+                    (height + drawnHeight) / 2f,
+                ),
+                Paint(Paint.ANTI_ALIAS_FLAG or Paint.FILTER_BITMAP_FLAG or Paint.DITHER_FLAG),
+            )
+            canvas.restore()
+            file.takeIf { writeBitmapCache(rendered, file, quality) }
+        } catch (_: Exception) {
+            null
+        } catch (_: OutOfMemoryError) {
+            null
+        } finally {
+            snapshot?.recycle()
+            source.recycle()
         }
-        val drawnWidth = source.width * scale
-        val drawnHeight = source.height * scale
-        if (displayMode == DISPLAY_MODE_BLUR) {
-            WakeWallBlurRenderer.draw(canvas, source, width, height)
+    }
+
+    // Publishes complete cache files so process death cannot leave a partial preview in use.
+    private fun writeBitmapCache(bitmap: Bitmap, destination: File, quality: Int): Boolean {
+        val temporary = File(destination.parentFile, ".wakewall_${UUID.randomUUID()}.tmp")
+        return try {
+            val compressed = temporary.outputStream().buffered().use {
+                bitmap.compress(Bitmap.CompressFormat.JPEG, quality, it)
+            }
+            compressed && temporary.length() > 0 &&
+                (temporary.renameTo(destination) || destination.run { isFile && length() > 0 })
+        } catch (_: Exception) {
+            false
+        } finally {
+            temporary.delete()
+            if (destination.length() <= 0) destination.delete()
         }
-        val maxOffsetX = max(
-            0f,
-            (drawnWidth * crop.scale - foregroundViewportWidth) / (2f * foregroundViewportWidth),
-        )
-        val maxOffsetY = max(0f, (drawnHeight * crop.scale - height) / (2f * height))
-        canvas.save()
-        canvas.translate(
-            width / 2f +
-                crop.offsetX.coerceIn(-maxOffsetX, maxOffsetX) * foregroundViewportWidth,
-            height / 2f + crop.offsetY.coerceIn(-maxOffsetY, maxOffsetY) * height,
-        )
-        canvas.scale(crop.scale, crop.scale)
-        canvas.translate(-width / 2f, -height / 2f)
-        canvas.drawBitmap(
-            source,
-            null,
-            android.graphics.RectF(
-                (width - drawnWidth) / 2f,
-                (height - drawnHeight) / 2f,
-                (width + drawnWidth) / 2f,
-                (height + drawnHeight) / 2f,
-            ),
-            Paint(Paint.ANTI_ALIAS_FLAG or Paint.FILTER_BITMAP_FLAG or Paint.DITHER_FLAG),
-        )
-        canvas.restore()
-        source.recycle()
-        val saved = runCatching {
-            file.outputStream().use { snapshot.compress(Bitmap.CompressFormat.JPEG, quality, it) }
-        }.getOrDefault(false)
-        snapshot.recycle()
-        return file.takeIf { saved }
     }
 
     private fun deleteCachedPreviews(value: String) {
@@ -1184,10 +1212,10 @@ class WakeWallStore(context: Context) {
     }
 
     // Keeps readable originals and only re-encodes unusual provider results as a fallback.
-    private fun importIntoAppStorage(uri: Uri): ImportOutcome {
+    private fun importIntoAppStorage(uri: Uri, enforceImportCaps: Boolean): ImportOutcome {
         val name = displayName(uri.toString())
         val originalDestination = File(importStagingDirectory(), "${UUID.randomUUID()}.image")
-        val original = copyReadableOriginal(uri, originalDestination)
+        val original = copyReadableOriginal(uri, originalDestination, enforceImportCaps)
         if (original.saved) {
             val value = promoteImport(originalDestination, ".image") ?: return ImportOutcome()
             prefs.edit()
@@ -1197,9 +1225,19 @@ class WakeWallStore(context: Context) {
             return ImportOutcome(value = value)
         }
 
-        originalDestination.delete()
         val fallbackDestination = File(importStagingDirectory(), "${UUID.randomUUID()}.jpg")
-        val normalized = normalizeImage(uri, fallbackDestination)
+        val fallbackMaxEdge = if (enforceImportCaps) NORMAL_IMPORT_MAX_IMAGE_EDGE else Float.MAX_VALUE
+        val normalized = try {
+            normalizeImage(
+                uri,
+                fallbackDestination,
+                fallbackMaxEdge,
+                enforceImportCaps,
+                originalDestination.takeIf { original.readyForNormalization },
+            )
+        } finally {
+            originalDestination.delete()
+        }
         prefs.edit()
             .putString(
                 "last_import_diagnostics",
@@ -1229,8 +1267,12 @@ class WakeWallStore(context: Context) {
         return null
     }
 
-    // Copies the provider's original bytes when Android can fully decode them.
-    private fun copyReadableOriginal(uri: Uri, destination: File): PreserveResult {
+    // Copies original bytes; Ultra mode trusts readable files instead of re-saving them.
+    private fun copyReadableOriginal(
+        uri: Uri,
+        destination: File,
+        enforceImportCaps: Boolean,
+    ): PreserveResult {
         val source = File.createTempFile(
             "wakewall_original_",
             ".image",
@@ -1238,51 +1280,55 @@ class WakeWallStore(context: Context) {
         )
         val diagnostics = mutableListOf<String>()
         return try {
-            val accessRoutes = listOf<Pair<String, (File) -> Boolean>>(
+            val accessRoutes = mutableListOf<Pair<String, (File) -> Boolean>>(
                 "original_descriptor" to { copyFromOriginalFileDescriptor(uri, it) },
                 "file_descriptor" to { copyFromFileDescriptor(uri, it) },
                 "asset_descriptor" to { copyFromAssetDescriptor(uri, it) },
                 "input_stream" to { copyFromInputStream(uri, it) },
             )
-            accessRoutes.forEach { (label, copy) ->
-                source.delete()
-                val copied = copy(source)
-                diagnostics.add("$label:${if (copied) source.length() else "unavailable"}")
-                if (!copied || source.length() <= 0) return@forEach
-                if (source.length() > MAX_ORIGINAL_IMAGE_BYTES) {
-                    diagnostics.add("$label:too_large")
-                    return@forEach
-                }
-                if (validateOriginal(source) && moveImportSource(source, destination)) {
-                    diagnostics.add("$label:preserved")
-                    return PreserveResult(true, diagnostics.joinToString(", "))
-                }
-                diagnostics.add("$label:invalid")
-            }
-
             val mediaUri = equivalentMediaStoreUri(uri)
             if (mediaUri != null && mediaUri != uri) {
-                val localRoutes = listOf<Pair<String, (File) -> Boolean>>(
+                accessRoutes += listOf<Pair<String, (File) -> Boolean>>(
                     "media_original_descriptor" to { copyFromOriginalFileDescriptor(mediaUri, it) },
                     "media_file_descriptor" to { copyFromFileDescriptor(mediaUri, it) },
                     "media_asset_descriptor" to { copyFromAssetDescriptor(mediaUri, it) },
                     "media_input_stream" to { copyFromInputStream(mediaUri, it) },
                 )
-                localRoutes.forEach { (label, copy) ->
-                    source.delete()
-                    val copied = copy(source)
-                    diagnostics.add("$label:${if (copied) source.length() else "unavailable"}")
-                    if (!copied || source.length() <= 0) return@forEach
-                    if (source.length() > MAX_ORIGINAL_IMAGE_BYTES) {
-                        diagnostics.add("$label:too_large")
-                        return@forEach
-                    }
-                    if (validateOriginal(source) && moveImportSource(source, destination)) {
-                        diagnostics.add("$label:preserved")
-                        return PreserveResult(true, diagnostics.joinToString(", "))
-                    }
-                    diagnostics.add("$label:invalid")
+            }
+
+            for ((label, copy) in accessRoutes) {
+                source.delete()
+                val copied = copy(source)
+                diagnostics.add("$label:${if (copied) source.length() else "unavailable"}")
+                if (!copied || source.length() <= 0) continue
+                val dimensions = imageDimensions(source)
+                val capFailure = if (enforceImportCaps) {
+                    normalImportCapFailure(source, dimensions)
+                } else {
+                    null
                 }
+                if (capFailure != null) {
+                    diagnostics.add("$label:$capFailure")
+                    // Reuse this complete provider copy instead of reading a huge file again.
+                    if (dimensions != null && moveImportSource(source, destination)) {
+                        diagnostics.add("$label:staged_for_normalization")
+                        return PreserveResult(
+                            saved = false,
+                            diagnostics = diagnostics.joinToString(", "),
+                            readyForNormalization = true,
+                        )
+                    }
+                    continue
+                }
+                if (canPreserveOriginal(source, enforceImportCaps) &&
+                    moveImportSource(source, destination)
+                ) {
+                    diagnostics.add(
+                        "$label:${if (enforceImportCaps) "preserved" else "preserved_ultra"}",
+                    )
+                    return PreserveResult(true, diagnostics.joinToString(", "))
+                }
+                diagnostics.add("$label:invalid")
             }
             PreserveResult(false, diagnostics.joinToString(", "))
         } finally {
@@ -1308,8 +1354,36 @@ class WakeWallStore(context: Context) {
         return usable
     }
 
+    private fun canPreserveOriginal(source: File, enforceImportCaps: Boolean): Boolean {
+        if (!enforceImportCaps) return true
+        if (imageDimensions(source) == null) return false
+        return validateOriginal(source)
+    }
+
+    private fun fitsNormalImportCaps(source: File): Boolean =
+        normalImportCapFailure(source) == null
+
+    private fun normalImportCapFailure(
+        source: File,
+        dimensions: Pair<Int, Int>? = imageDimensions(source),
+    ): String? {
+        if (source.length() > NORMAL_IMPORT_MAX_IMAGE_BYTES) return "too_large"
+        dimensions ?: return null
+        return if (max(dimensions.first, dimensions.second).toFloat() > NORMAL_IMPORT_MAX_IMAGE_EDGE) {
+            "too_many_pixels"
+        } else {
+            null
+        }
+    }
+
     // Tries every automatic provider access route before giving up on a selection.
-    private fun normalizeImage(uri: Uri, destination: File): NormalizeResult {
+    private fun normalizeImage(
+        uri: Uri,
+        destination: File,
+        maxEdge: Float,
+        enforceImportCaps: Boolean,
+        initialSource: File? = null,
+    ): NormalizeResult {
         val source = File.createTempFile(
             "wakewall_import_",
             ".image",
@@ -1319,6 +1393,24 @@ class WakeWallStore(context: Context) {
         var fallbackBytes: ByteArray? = null
         var expectedSize: Pair<Int, Int>? = null
         return try {
+            if (initialSource?.isFile == true && initialSource.length() > 0) {
+                diagnostics.add("staged_cap_source:${initialSource.length()}")
+                if (initialSource.length() <= MAX_FALLBACK_BYTES) {
+                    fallbackBytes = runCatching { initialSource.readBytes() }.getOrNull()
+                }
+                val dimensions = imageDimensions(initialSource)
+                expectedSize = dimensions
+                val decoded = takeUsableBitmap(
+                    decodeNormalizedBitmap(initialSource, maxEdge),
+                    dimensions,
+                )
+                if (decoded != null && saveNormalizedImport(decoded, destination, enforceImportCaps)) {
+                    diagnostics.add("staged_cap_source:decoded")
+                    return NormalizeResult(true, fallbackBytes, diagnostics.joinToString(", "))
+                }
+                diagnostics.add("staged_cap_source:decode_failed")
+            }
+
             val accessRoutes = listOf<Pair<String, (File) -> Boolean>>(
                 "original_descriptor" to { copyFromOriginalFileDescriptor(uri, it) },
                 "file_descriptor" to { copyFromFileDescriptor(uri, it) },
@@ -1337,9 +1429,11 @@ class WakeWallStore(context: Context) {
                 }
                 val dimensions = imageDimensions(source)
                 if (expectedSize == null) expectedSize = dimensions
-                val decoded = decodeNormalizedBitmap(source)
-                    ?.takeIf { isUsableBitmap(it, dimensions ?: expectedSize) }
-                if (decoded != null && saveAsJpeg(decoded, destination)) {
+                val decoded = takeUsableBitmap(
+                    decodeNormalizedBitmap(source, maxEdge),
+                    dimensions ?: expectedSize,
+                )
+                if (decoded != null && saveNormalizedImport(decoded, destination, enforceImportCaps)) {
                     diagnostics.add("$label:decoded")
                     return NormalizeResult(true, fallbackBytes, diagnostics.joinToString(", "))
                 }
@@ -1366,9 +1460,11 @@ class WakeWallStore(context: Context) {
                     }
                     val dimensions = imageDimensions(source)
                     if (expectedSize == null) expectedSize = dimensions
-                    val decoded = decodeNormalizedBitmap(source)
-                        ?.takeIf { isUsableBitmap(it, dimensions ?: expectedSize) }
-                    if (decoded != null && saveAsJpeg(decoded, destination)) {
+                    val decoded = takeUsableBitmap(
+                        decodeNormalizedBitmap(source, maxEdge),
+                        dimensions ?: expectedSize,
+                    )
+                    if (decoded != null && saveNormalizedImport(decoded, destination, enforceImportCaps)) {
                         diagnostics.add("$label:decoded")
                         return NormalizeResult(true, fallbackBytes, diagnostics.joinToString(", "))
                     }
@@ -1378,15 +1474,15 @@ class WakeWallStore(context: Context) {
                 diagnostics.add("media_equivalent:unavailable")
             }
 
-            val transformed = loadProviderTransformedImage(uri, expectedSize)
-            if (transformed != null && saveAsJpeg(transformed, destination)) {
+            val transformed = loadProviderTransformedImage(uri, expectedSize, maxEdge)
+            if (transformed != null && saveNormalizedImport(transformed, destination, enforceImportCaps)) {
                 diagnostics.add("provider_transformed:decoded")
                 return NormalizeResult(true, fallbackBytes, diagnostics.joinToString(", "))
             }
             diagnostics.add("provider_transformed:failed")
 
-            val rendered = loadProviderRenderedImage(uri, expectedSize)
-            if (rendered != null && saveAsJpeg(rendered, destination)) {
+            val rendered = loadProviderRenderedImage(uri, expectedSize, maxEdge)
+            if (rendered != null && saveNormalizedImport(rendered, destination, enforceImportCaps)) {
                 diagnostics.add("provider_thumbnail:decoded")
                 return NormalizeResult(true, fallbackBytes, diagnostics.joinToString(", "))
             }
@@ -1464,8 +1560,12 @@ class WakeWallStore(context: Context) {
     }
 
     // Asks the photo provider for a complete rendered image instead of raw bytes.
-    private fun loadProviderTransformedImage(uri: Uri, expectedSize: Pair<Int, Int>?): Bitmap? {
-        return providerRenderSizes(expectedSize).firstNotNullOfOrNull { size ->
+    private fun loadProviderTransformedImage(
+        uri: Uri,
+        expectedSize: Pair<Int, Int>?,
+        maxEdge: Float,
+    ): Bitmap? {
+        return providerRenderSizes(expectedSize, maxEdge).firstNotNullOfOrNull { size ->
             val rendered = File.createTempFile(
                 "wakewall_rendered_",
                 ".image",
@@ -1485,7 +1585,7 @@ class WakeWallStore(context: Context) {
                         } != null
                 }.getOrDefault(false)
                 if (!copied) return@firstNotNullOfOrNull null
-                decodeNormalizedBitmap(rendered)?.takeIf { isUsableBitmap(it, expectedSize) }
+                takeUsableBitmap(decodeNormalizedBitmap(rendered, maxEdge), expectedSize)
             } finally {
                 rendered.delete()
             }
@@ -1493,19 +1593,23 @@ class WakeWallStore(context: Context) {
     }
 
     // Lets the selected photo provider render cloud-backed or unusual images.
-    private fun loadProviderRenderedImage(uri: Uri, expectedSize: Pair<Int, Int>?): Bitmap? {
+    private fun loadProviderRenderedImage(
+        uri: Uri,
+        expectedSize: Pair<Int, Int>?,
+        maxEdge: Float,
+    ): Bitmap? {
         if (Build.VERSION.SDK_INT < Build.VERSION_CODES.Q) return null
-        return providerRenderSizes(expectedSize).firstNotNullOfOrNull { size ->
+        return providerRenderSizes(expectedSize, maxEdge).firstNotNullOfOrNull { size ->
             runCatching {
                 appContext.contentResolver.loadThumbnail(uri, size, null)
-            }.getOrNull()?.takeIf { isUsableBitmap(it, expectedSize) }
+            }.getOrNull().let { takeUsableBitmap(it, expectedSize) }
         }
     }
 
     // Requests provider previews at the photo's own shape instead of a huge square.
-    private fun providerRenderSizes(expectedSize: Pair<Int, Int>?): List<Size> {
+    private fun providerRenderSizes(expectedSize: Pair<Int, Int>?, maxEdge: Float): List<Size> {
         val (width, height) = expectedSize ?: return listOf(Size(1440, 1440), Size(720, 720))
-        return listOf(MAX_IMAGE_EDGE, 2048f, 1024f)
+        return listOf(maxEdge, 2048f, 1024f)
             .map { edge ->
                 val scale = (edge / max(width, height).toFloat()).coerceAtMost(1f)
                 Size(max(1, (width * scale).roundToInt()), max(1, (height * scale).roundToInt()))
@@ -1521,6 +1625,12 @@ class WakeWallStore(context: Context) {
         val actualRatio = bitmap.width.toDouble() / bitmap.height
         return abs(actualRatio - expectedRatio) / expectedRatio < .08 ||
             abs(actualRatio - 1 / expectedRatio) / (1 / expectedRatio) < .08
+    }
+
+    private fun takeUsableBitmap(bitmap: Bitmap?, expectedSize: Pair<Int, Int>?): Bitmap? {
+        if (bitmap == null || isUsableBitmap(bitmap, expectedSize)) return bitmap
+        bitmap.recycle()
+        return null
     }
 
     private fun imageDimensions(file: File): Pair<Int, Int>? {
@@ -1616,19 +1726,47 @@ class WakeWallStore(context: Context) {
     }
 
     private fun saveAsJpeg(decoded: Bitmap, destination: File): Boolean {
-        val flattened = Bitmap.createBitmap(decoded.width, decoded.height, Bitmap.Config.ARGB_8888)
-        Canvas(flattened).apply {
-            drawColor(Color.BLACK)
-            drawBitmap(decoded, 0f, 0f, null)
-        }
-        if (decoded !== flattened) decoded.recycle()
-        val saved = runCatching {
-            destination.outputStream().use {
-                flattened.compress(Bitmap.CompressFormat.JPEG, 98, it)
+        var flattened: Bitmap? = null
+        var saved = false
+        try {
+            val output = if (decoded.hasAlpha()) {
+                Bitmap.createBitmap(decoded.width, decoded.height, Bitmap.Config.ARGB_8888).also {
+                    flattened = it
+                    Canvas(it).apply {
+                        drawColor(Color.BLACK)
+                        drawBitmap(decoded, 0f, 0f, null)
+                    }
+                }
+            } else {
+                decoded
             }
-        }.getOrDefault(false)
-        flattened.recycle()
+            saved = destination.outputStream().buffered().use {
+                output.compress(Bitmap.CompressFormat.JPEG, 98, it)
+            } && destination.length() > 0
+        } catch (_: Exception) {
+            saved = false
+        } catch (_: OutOfMemoryError) {
+            saved = false
+        } finally {
+            flattened?.recycle()
+            decoded.recycle()
+            if (!saved) destination.delete()
+        }
         return saved
+    }
+
+    private fun saveNormalizedImport(
+        decoded: Bitmap,
+        destination: File,
+        enforceImportCaps: Boolean,
+    ): Boolean {
+        val saved = saveAsJpeg(decoded, destination)
+        if (!saved) return false
+        if (enforceImportCaps && destination.length() > NORMAL_IMPORT_MAX_IMAGE_BYTES) {
+            destination.delete()
+            return false
+        }
+        return true
     }
 
     fun localFile(value: String): File? {
@@ -1658,10 +1796,11 @@ class WakeWallStore(context: Context) {
         private const val BACKUP_FORMAT = "com.zambl.wakewall.backup"
         private const val MAX_BACKUP_WALLPAPERS = 1000
         private const val MAX_BACKUP_MANIFEST_BYTES = 1024L * 1024
-        private const val MAX_BACKUP_IMAGE_BYTES = 256L * 1024 * 1024
+        private const val MAX_BACKUP_IMAGE_BYTES = 1024L * 1024 * 1024
         private const val MAX_BACKUP_TOTAL_BYTES = 2L * 1024 * 1024 * 1024
         private const val MAX_FALLBACK_BYTES = 64L * 1024 * 1024
-        private const val MAX_ORIGINAL_IMAGE_BYTES = 256L * 1024 * 1024
+        private const val NORMAL_IMPORT_MAX_IMAGE_EDGE = 8192f
+        private const val NORMAL_IMPORT_MAX_IMAGE_BYTES = 200L * 1024 * 1024
         private const val DISPLAY_MODE_FILL = "fill"
         private const val DISPLAY_MODE_FIT = "fit"
         private const val DISPLAY_MODE_BLUR = "blur"
@@ -1743,4 +1882,5 @@ data class NormalizeResult(
 data class PreserveResult(
     val saved: Boolean,
     val diagnostics: String,
+    val readyForNormalization: Boolean = false,
 )

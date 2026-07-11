@@ -187,6 +187,8 @@ rendering behavior should remain visually aligned.
 Wallpaper scrolling is optional and disabled by default.
 
 - Enabling it prepares one wider cached wallpaper render per image.
+- Wider renders are prepared only when scrolling changes from disabled to
+  enabled; unrelated setting changes must not rebuild the library.
 - Fill uses the existing full horizontal scrolling movement.
 - Fit and Blur remain centred while scrolling is enabled because moving a
   complete bordered foreground exposes uneven borders. Fill remains scrollable.
@@ -203,8 +205,14 @@ Wallpaper scrolling is optional and disabled by default.
 
 - WakeWall copies readable selected originals into app-private storage.
 - Readable originals should be preserved without re-encoding.
-- The native pipeline currently caps normalized oversized/fallback image edges
-  at 6144 pixels.
+- Normal new imports preserve readable originals only when they fit the safety
+  caps: maximum 8192 px on the longest edge and 200 MB on disk.
+- New imports above those safety caps are normalized into a high-quality JPEG
+  capped at 8192 px on the longest edge.
+- Experimental Ultra High Resolution mode skips those normal-import safety caps
+  for future imports only and should preserve readable original bytes instead
+  of re-saving them. It must not rewrite existing wallpapers or cap restored
+  backup images.
 - Unusual or provider-backed images may use a normalized high-quality JPEG
   fallback when direct copying or decoding is impossible.
 
@@ -222,6 +230,9 @@ Display mode, crop, Fit colour, and scrolling composition are baked into the
 appropriate derived render. Changing those properties must invalidate and
 replace stale derivatives.
 
+Derived caches are published only after the complete file is written. Empty or
+interrupted cache files are invalid and must be regenerated.
+
 ### Runtime Frames
 
 The live wallpaper engine keeps current and next rendered frames in memory so
@@ -232,6 +243,8 @@ Temporary bitmaps must be recycled when replaced or when an engine is destroyed.
 
 - Imports are transactionally tracked until complete.
 - Incomplete imports are cleaned after interruption or force-stop recovery.
+- Housekeeping runs from the app's serialized delayed startup task, not whenever
+  a native store object is created, so it cannot race an active import.
 - Removed wallpapers remain temporarily restorable during the Undo window.
 - Finalized removals delete the original private copy, previews, renders, and
   metadata.
@@ -246,7 +259,10 @@ Temporary bitmaps must be recycled when replaced or when an engine is destroyed.
   configuration, including order, crops, display modes, Fit colours, albums,
   active album filters, and settings.
 - Restore validates the backup before replacing the current setup.
+- Restore persists the replacement configuration before deleting old originals.
 - Restore warns before replacing a populated setup.
+- One image may use up to 1 GB inside a backup, within the existing 2 GB total
+  backup limit, so Ultra High Resolution originals remain portable.
 - Current backup format version: `3`.
 - Until explicitly requested, do **not** spend development effort supporting
   older backup versions. The tester group is small and backups can be recreated.
@@ -254,11 +270,12 @@ Temporary bitmaps must be recycled when replaced or when an engine is destroyed.
 ## Current Settings
 
 - Order: `Shuffle` or `In Order`
-- Photo Source: `Ask`, `Photos`, or `Files`
-- Choose Albums After Import
 - Pause WakeWall
 - Theme: `System`, `Light`, `Dark`, or experimental `Midnight`
 - Wallpaper Scrolling
+- Photo Source: `Ask`, `Photos`, or `Files`
+- Choose Albums After Import
+- Experimental Ultra High Resolution
 - Backup
 - Restore
 - Use WakeWall / WakeWall Is Active
@@ -287,6 +304,8 @@ placed directly beside the feature it controls.
   Gesture navigation and 3-button navigation should use the same approximate
   preview-to-strip ratio, with a minimum strip height so thumbnails remain
   usable when Android reduces the safe screen height.
+- Landscape and unusually short app windows may scroll vertically rather than
+  shrinking controls or overflowing; normal portrait composition stays fixed.
 - Bottom-sheet content must reserve the Android bottom safe area so rows and
   buttons never dip under gesture or 3-button navigation.
 - Avoid shifting major layout elements when contextual controls appear.
@@ -306,11 +325,20 @@ placed directly beside the feature it controls.
   so thumbnail taps feel immediate.
 - Album filter taps keep sheet feedback local and debounce native filter sync so
   the checkmark animation is not competing with wallpaper-list refresh work.
+- User-created album rows expose a small management action as well as retaining
+  long-press access to rename and delete.
+- Settings switch cards are tappable across the complete row, and compact visual
+  controls should retain practical Android touch targets where space allows.
 - Crop-editor header actions should keep stable positions.
 - The crop-editor title is `Adjust Wallpaper`; it stays centred in the header
   and scales down on narrow screens rather than wrapping, overlapping, or
   moving the corner actions. Reset appears as a preview overlay action only when
   there is something to reset.
+- The crop grid appears while the user drags or zooms, then fades so the final
+  composition can be inspected clearly. Saving keeps the editor open and shows
+  the shared notice style if Android cannot finish the update.
+- Damaged preview bytes display a clear broken-image placeholder rather than an
+  empty frame.
 
 ### Copy Style
 

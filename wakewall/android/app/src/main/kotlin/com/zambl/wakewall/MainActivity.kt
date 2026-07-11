@@ -154,17 +154,34 @@ class MainActivity : FlutterFragmentActivity() {
                         val fit = call.argument<String>("fit") ?: "cropToFill"
                         val themeMode = call.argument<String>("themeMode") ?: "system"
                         val wallpaperScrolling = call.argument<Boolean>("wallpaperScrolling") ?: false
-                        if (!wallpaperScrolling) {
-                            val store = WakeWallStore(this)
-                            store.updateSettings(paused, shuffle, fit, themeMode, wallpaperScrolling)
+                        val ultraHighResolutionMode =
+                            call.argument<Boolean>("ultraHighResolutionMode") ?: false
+                        val store = WakeWallStore(this)
+                        val needsScrollingPreparation =
+                            wallpaperScrolling && !store.wallpaperScrolling
+                        if (!needsScrollingPreparation) {
+                            store.updateSettings(
+                                paused,
+                                shuffle,
+                                fit,
+                                themeMode,
+                                wallpaperScrolling,
+                                ultraHighResolutionMode,
+                            )
                             notifyWallpaperService()
                             result.success(null)
                         } else {
                             // Scrolling needs wider renders ready before the setting is exposed.
                             runInBackground(result) {
-                                val store = WakeWallStore(this)
-                                store.updateSettings(paused, shuffle, fit, themeMode, wallpaperScrolling)
                                 store.prepareScrollingRenders()
+                                store.updateSettings(
+                                    paused,
+                                    shuffle,
+                                    fit,
+                                    themeMode,
+                                    wallpaperScrolling,
+                                    ultraHighResolutionMode,
+                                )
                                 notifyWallpaperService()
                                 null
                             }

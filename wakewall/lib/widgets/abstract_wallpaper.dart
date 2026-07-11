@@ -58,6 +58,7 @@ class AbstractWallpaper extends StatelessWidget {
               fit: fit,
               gaplessPlayback: true,
               filterQuality: quality ?? filterQuality,
+              errorBuilder: (_, _, _) => const _BrokenWallpaperPlaceholder(),
             );
             return turns == 0
                 ? image
@@ -205,15 +206,7 @@ class AbstractWallpaper extends StatelessWidget {
                       fit: BoxFit.cover,
                     )
                   : wallpaper.isUserImage
-                  ? const ColoredBox(
-                      color: Color(0xFF202124),
-                      child: Center(
-                        child: Icon(
-                          Icons.broken_image_outlined,
-                          color: Color(0xFFA7A9B0),
-                        ),
-                      ),
-                    )
+                  ? const _BrokenWallpaperPlaceholder()
                   : CustomPaint(
                       painter: _AbstractWallpaperPainter(wallpaper),
                       child: const SizedBox.expand(),
@@ -221,6 +214,20 @@ class AbstractWallpaper extends StatelessWidget {
             ),
           );
         },
+      ),
+    );
+  }
+}
+
+class _BrokenWallpaperPlaceholder extends StatelessWidget {
+  const _BrokenWallpaperPlaceholder();
+
+  @override
+  Widget build(BuildContext context) {
+    return const ColoredBox(
+      color: Color(0xFF202124),
+      child: Center(
+        child: Icon(Icons.broken_image_outlined, color: Color(0xFFA7A9B0)),
       ),
     );
   }

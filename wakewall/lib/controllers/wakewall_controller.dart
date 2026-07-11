@@ -27,6 +27,7 @@ class WakeWallController extends ChangeNotifier {
   WallpaperFit _fit = WallpaperFit.cropToFill;
   WakeWallThemeMode _themeMode = WakeWallThemeMode.system;
   bool _wallpaperScrolling = false;
+  bool _ultraHighResolutionMode = false;
   bool _wakeWallActive = false;
   PhotoSource _photoSource = PhotoSource.askEveryTime;
   String? _lastNativeError;
@@ -46,6 +47,7 @@ class WakeWallController extends ChangeNotifier {
   WallpaperFit get fit => _fit;
   WakeWallThemeMode get themeMode => _themeMode;
   bool get wallpaperScrolling => _wallpaperScrolling;
+  bool get ultraHighResolutionMode => _ultraHighResolutionMode;
   bool get wakeWallActive => _wakeWallActive;
   PhotoSource get photoSource => _photoSource;
   Uint8List? get selectedPreview => selectedWallpaper?.preview;
@@ -97,23 +99,18 @@ class WakeWallController extends ChangeNotifier {
   }
 
   // Saves a crop in the app and sends the same position to Android.
-  Future<void> updateCrop(
+  Future<bool> updateCrop(
     int index,
     WallpaperCrop crop, {
     WallpaperDisplayMode? displayMode,
     Color? fitBackgroundColor,
     int rotationQuarterTurns = 0,
   }) async {
-    if (index < 0 || index >= _wallpapers.length) return;
+    if (index < 0 || index >= _wallpapers.length) return false;
     final selectedMode = displayMode ?? _wallpapers[index].displayMode;
     final selectedFitColor =
         fitBackgroundColor ?? _wallpapers[index].fitBackgroundColor;
-    _wallpapers[index] = _wallpapers[index].copyWith(
-      crop: crop,
-      displayMode: selectedMode,
-      fitBackgroundColor: selectedFitColor,
-    );
-    notifyListeners();
+    var saved = false;
     await _runNative(() async {
       final updated = _wallpaperFromNative(
         await _bridge.updateCrop(
@@ -128,9 +125,13 @@ class WakeWallController extends ChangeNotifier {
       );
       if (updated != null) {
         _wallpapers[index] = updated;
+        saved = true;
         notifyListeners();
+      } else {
+        throw StateError('WakeWall did not return the updated wallpaper.');
       }
     });
+    return saved;
   }
 
   Future<void> next() async {
@@ -256,6 +257,7 @@ class WakeWallController extends ChangeNotifier {
           final normalized = await compute(_normalizeFailedImage, {
             'name': data['name'] as String? ?? 'Photo',
             'bytes': data['bytes'] as Uint8List,
+            'maxEdge': _ultraHighResolutionMode ? null : 8192,
           });
           if (normalized == null) continue;
           final recoveredConfiguration = await _bridge.importNormalizedImages([
@@ -373,6 +375,12 @@ class WakeWallController extends ChangeNotifier {
     await _syncSettings();
   }
 
+  Future<void> setUltraHighResolutionMode(bool value) async {
+    _ultraHighResolutionMode = value;
+    notifyListeners();
+    await _syncSettings();
+  }
+
   Future<void> openWallpaperPicker() => _runNative(_bridge.openWallpaperPicker);
 
   Future<bool> claimWallpaperSetupOffer() async {
@@ -393,6 +401,7 @@ class WakeWallController extends ChangeNotifier {
         fit: _fit.name,
         themeMode: _themeMode.name,
         wallpaperScrolling: _wallpaperScrolling,
+        ultraHighResolutionMode: _ultraHighResolutionMode,
       ),
     );
   }
@@ -438,6 +447,9 @@ class WakeWallController extends ChangeNotifier {
     }
     _wallpaperScrolling =
         configuration['wallpaperScrolling'] as bool? ?? _wallpaperScrolling;
+    _ultraHighResolutionMode =
+        configuration['ultraHighResolutionMode'] as bool? ??
+        _ultraHighResolutionMode;
     final savedThemeMode = configuration['themeMode'] as String?;
     if (savedThemeMode != null) {
       _themeMode = WakeWallThemeMode.values.firstWhere(
@@ -585,10 +597,12 @@ class WakeWallController extends ChangeNotifier {
       await action();
     } on MissingPluginException {
       _lastNativeError = 'Native wallpaper controls require Android.';
+      notifyListeners();
     } on PlatformException catch (error) {
       _lastNativeError = error.message ?? error.code;
+      notifyListeners();
     } catch (_) {
-      _lastNativeError = 'The selected photo could not be imported.';
+      _lastNativeError = 'WakeWall could not complete that action.';
       notifyListeners();
     }
   }
@@ -618,11 +632,13 @@ Map<String, Object?>? _normalizeFailedImage(Map<String, Object?> value) {
     final decoded = image.decodeImage(value['bytes']! as Uint8List);
     if (decoded == null) return null;
     var normalized = image.bakeOrientation(decoded);
-    if (normalized.width > 6144 || normalized.height > 6144) {
+    final maxEdge = value['maxEdge'] as int?;
+    if (maxEdge != null &&
+        (normalized.width > maxEdge || normalized.height > maxEdge)) {
       if (normalized.width >= normalized.height) {
-        normalized = image.copyResize(normalized, width: 6144);
+        normalized = image.copyResize(normalized, width: maxEdge);
       } else {
-        normalized = image.copyResize(normalized, height: 6144);
+        normalized = image.copyResize(normalized, height: maxEdge);
       }
     }
     return {

@@ -131,13 +131,14 @@ void main() {
     final controller = WakeWallController(bridge: bridge);
 
     await controller.initialize();
-    await controller.updateCrop(
+    final saved = await controller.updateCrop(
       0,
       const WallpaperCrop(scale: 1.5, offsetX: .1, offsetY: -.1),
       displayMode: WallpaperDisplayMode.blur,
       fitBackgroundColor: const Color(0xFF182230),
     );
 
+    expect(saved, isTrue);
     expect(controller.wallpapers.first.crop.scale, 1.5);
     expect(controller.wallpapers.first.displayMode, WallpaperDisplayMode.blur);
     expect(
