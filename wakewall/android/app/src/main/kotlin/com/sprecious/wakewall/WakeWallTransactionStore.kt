@@ -1,4 +1,4 @@
-package com.zambl.wakewall
+package com.sprecious.wakewall
 
 import android.content.SharedPreferences
 import org.json.JSONArray

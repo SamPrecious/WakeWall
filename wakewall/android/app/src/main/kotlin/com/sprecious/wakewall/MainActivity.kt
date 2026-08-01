@@ -1,4 +1,4 @@
-package com.zambl.wakewall
+package com.sprecious.wakewall
 
 import android.app.WallpaperManager
 import android.content.ComponentName
@@ -13,7 +13,7 @@ import java.util.concurrent.Executors
 import java.util.concurrent.TimeUnit
 
 class MainActivity : FlutterFragmentActivity() {
-    private val channelName = "com.zambl.wakewall/control"
+    private val channelName = "com.sprecious.wakewall/control"
     private lateinit var controlChannel: MethodChannel
     private var pendingImageResult: MethodChannel.Result? = null
     private var pendingBackupResult: MethodChannel.Result? = null

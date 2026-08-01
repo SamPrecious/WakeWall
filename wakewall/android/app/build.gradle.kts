@@ -4,8 +4,22 @@ plugins {
     id("dev.flutter.flutter-gradle-plugin")
 }
 
+val keystorePropertiesFile = rootProject.file("key.properties")
+val keystoreProperties = if (keystorePropertiesFile.exists()) {
+    keystorePropertiesFile.readLines(Charsets.UTF_8).mapNotNull { line ->
+        val separator = line.indexOf('=')
+        if (separator > 0) {
+            line.substring(0, separator) to line.substring(separator + 1)
+        } else {
+            null
+        }
+    }.toMap()
+} else {
+    emptyMap()
+}
+
 android {
-    namespace = "com.zambl.wakewall"
+    namespace = "com.sprecious.wakewall"
     compileSdk = flutter.compileSdkVersion
     ndkVersion = flutter.ndkVersion
 
@@ -15,7 +29,7 @@ android {
     }
 
     defaultConfig {
-        applicationId = "com.zambl.wakewall"
+        applicationId = "com.sprecious.wakewall"
         // You can update the following values to match your application needs.
         // For more information, see: https://flutter.dev/to/review-gradle-config.
         minSdk = flutter.minSdkVersion
@@ -24,11 +38,18 @@ android {
         versionName = flutter.versionName
     }
 
+    signingConfigs {
+        create("release") {
+            keyAlias = keystoreProperties.getValue("keyAlias")
+            keyPassword = keystoreProperties.getValue("keyPassword")
+            storeFile = file(keystoreProperties.getValue("storeFile"))
+            storePassword = keystoreProperties.getValue("storePassword")
+        }
+    }
+
     buildTypes {
         release {
-            // TODO: Add your own signing config for the release build.
-            // Signing with the debug keys for now, so `flutter run --release` works.
-            signingConfig = signingConfigs.getByName("debug")
+            signingConfig = signingConfigs.getByName("release")
         }
     }
 

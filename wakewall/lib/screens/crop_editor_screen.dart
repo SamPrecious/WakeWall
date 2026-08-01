@@ -10,6 +10,10 @@ import '../theme/wakewall_theme.dart';
 import '../widgets/abstract_wallpaper.dart';
 import '../widgets/wakewall_notice.dart';
 
+const _cropTabletBreakpoint = 600.0;
+const _cropTabletContentMaxWidth = 680.0;
+const _cropTabletPreviewMaxWidth = 620.0;
+
 void _cropTapHaptic() {
   HapticFeedback.selectionClick();
 }
@@ -80,13 +84,20 @@ class _CropEditorScreenState extends State<CropEditorScreen> {
               child: LayoutBuilder(
                 builder: (context, constraints) {
                   final screen = MediaQuery.sizeOf(context);
+                  final tablet = screen.width >= _cropTabletBreakpoint;
                   final phoneRatio = (screen.width / screen.height).clamp(
                     .44,
                     .62,
                   );
+                  final previewWidthLimit = tablet
+                      ? math.min(
+                          constraints.maxWidth - 64,
+                          _cropTabletPreviewMaxWidth,
+                        )
+                      : constraints.maxWidth - 40;
                   final height = math.min(
-                    constraints.maxHeight - 34,
-                    (constraints.maxWidth - 40) / phoneRatio,
+                    constraints.maxHeight - (tablet ? 48 : 34),
+                    previewWidthLimit / phoneRatio,
                   );
                   final width = height * phoneRatio;
                   final rotatedSideways = rotationQuarterTurns.isOdd;
@@ -169,6 +180,7 @@ class _CropEditorScreenState extends State<CropEditorScreen> {
                           child: Stack(
                             children: [
                               SizedBox(
+                                key: const ValueKey('crop-editor-preview'),
                                 width: width,
                                 height: height,
                                 child: AbstractWallpaper(
@@ -355,6 +367,11 @@ class _EditorHeader extends StatelessWidget {
                   softWrap: false,
                   textAlign: TextAlign.center,
                   style: Theme.of(context).textTheme.headlineSmall?.copyWith(
+                    fontSize:
+                        MediaQuery.sizeOf(context).width >=
+                            _cropTabletBreakpoint
+                        ? 28
+                        : null,
                     fontWeight: FontWeight.w500,
                     letterSpacing: -.2,
                   ),
@@ -427,61 +444,70 @@ class _EditorFooter extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final colors = context.wakeWallColors;
-    return Padding(
-      padding: const EdgeInsets.fromLTRB(24, 8, 24, 6),
-      child: Column(
-        children: [
-          SizedBox(
-            width: double.infinity,
-            child: SegmentedButton<WallpaperDisplayMode>(
-              segments: const [
-                ButtonSegment(
-                  value: WallpaperDisplayMode.fill,
-                  label: Text('Fill'),
-                  icon: Icon(Icons.crop_free_rounded),
+    return Center(
+      child: ConstrainedBox(
+        key: const ValueKey('crop-editor-footer'),
+        constraints: const BoxConstraints(maxWidth: _cropTabletContentMaxWidth),
+        child: Padding(
+          padding: const EdgeInsets.fromLTRB(24, 8, 24, 6),
+          child: Column(
+            children: [
+              SizedBox(
+                width: double.infinity,
+                child: SegmentedButton<WallpaperDisplayMode>(
+                  segments: const [
+                    ButtonSegment(
+                      value: WallpaperDisplayMode.fill,
+                      label: Text('Fill'),
+                      icon: Icon(Icons.crop_free_rounded),
+                    ),
+                    ButtonSegment(
+                      value: WallpaperDisplayMode.blur,
+                      label: Text('Blur'),
+                      icon: Icon(Icons.blur_on_rounded),
+                    ),
+                    ButtonSegment(
+                      value: WallpaperDisplayMode.fit,
+                      label: Text('Fit'),
+                      icon: Icon(Icons.fit_screen_rounded),
+                    ),
+                  ],
+                  selected: {displayMode},
+                  showSelectedIcon: false,
+                  onSelectionChanged: (selection) =>
+                      onDisplayModeChanged(selection.first),
                 ),
-                ButtonSegment(
-                  value: WallpaperDisplayMode.blur,
-                  label: Text('Blur'),
-                  icon: Icon(Icons.blur_on_rounded),
-                ),
-                ButtonSegment(
-                  value: WallpaperDisplayMode.fit,
-                  label: Text('Fit'),
-                  icon: Icon(Icons.fit_screen_rounded),
-                ),
-              ],
-              selected: {displayMode},
-              showSelectedIcon: false,
-              onSelectionChanged: (selection) =>
-                  onDisplayModeChanged(selection.first),
-            ),
-          ),
-          const SizedBox(height: 12),
-          SizedBox(
-            height: 48,
-            child: displayMode == WallpaperDisplayMode.fit
-                ? _FitBackgroundSelector(
-                    selected: fitBackgroundColor,
-                    onSelected: onFitBackgroundColorChanged,
-                  )
-                : Row(
-                    mainAxisAlignment: MainAxisAlignment.center,
-                    children: [
-                      Icon(Icons.pinch_rounded, size: 18, color: colors.muted),
-                      const SizedBox(width: 8),
-                      Text(
-                        crop.isDefault
-                            ? 'Pinch to zoom · Drag to position'
-                            : '${crop.scale.toStringAsFixed(1)}x zoom · Drag to position',
-                        style: Theme.of(
-                          context,
-                        ).textTheme.bodyMedium?.copyWith(color: colors.muted),
+              ),
+              const SizedBox(height: 12),
+              SizedBox(
+                height: 48,
+                child: displayMode == WallpaperDisplayMode.fit
+                    ? _FitBackgroundSelector(
+                        selected: fitBackgroundColor,
+                        onSelected: onFitBackgroundColorChanged,
+                      )
+                    : Row(
+                        mainAxisAlignment: MainAxisAlignment.center,
+                        children: [
+                          Icon(
+                            Icons.pinch_rounded,
+                            size: 18,
+                            color: colors.muted,
+                          ),
+                          const SizedBox(width: 8),
+                          Text(
+                            crop.isDefault
+                                ? 'Pinch to zoom · Drag to position'
+                                : '${crop.scale.toStringAsFixed(1)}x zoom · Drag to position',
+                            style: Theme.of(context).textTheme.bodyMedium
+                                ?.copyWith(color: colors.muted),
+                          ),
+                        ],
                       ),
-                    ],
-                  ),
+              ),
+            ],
           ),
-        ],
+        ),
       ),
     );
   }

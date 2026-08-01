@@ -1,4 +1,4 @@
-package com.zambl.wakewall
+package com.sprecious.wakewall
 
 import android.graphics.Bitmap
 import android.graphics.Canvas
@@ -23,7 +23,7 @@ object WakeWallBlurRenderer {
                 Paint(Paint.ANTI_ALIAS_FLAG or Paint.FILTER_BITMAP_FLAG or Paint.DITHER_FLAG),
             )
 
-            repeat(BLUR_PASSES) { boxBlur(backdrop, BLUR_RADIUS) }
+            boxBlur(backdrop, BLUR_RADIUS, BLUR_PASSES)
             canvas.drawBitmap(
                 backdrop,
                 null,
@@ -52,15 +52,17 @@ object WakeWallBlurRenderer {
         }
     }
 
-    private fun boxBlur(bitmap: Bitmap, radius: Int) {
-        // Two one-dimensional passes are much cheaper than sampling a full square per pixel.
+    private fun boxBlur(bitmap: Bitmap, radius: Int, passes: Int) {
+        // Reuse the pixel buffers across passes instead of allocating and copying for each blur.
         val width = bitmap.width
         val height = bitmap.height
         val source = IntArray(width * height)
         val target = IntArray(source.size)
         bitmap.getPixels(source, 0, width, 0, 0, width, height)
-        blurHorizontal(source, target, width, height, radius)
-        blurVertical(target, source, width, height, radius)
+        repeat(passes) {
+            blurHorizontal(source, target, width, height, radius)
+            blurVertical(target, source, width, height, radius)
+        }
         bitmap.setPixels(source, 0, width, 0, 0, width, height)
     }
 

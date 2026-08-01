@@ -32,6 +32,8 @@ class WakeWallController extends ChangeNotifier {
   PhotoSource _photoSource = PhotoSource.askEveryTime;
   String? _lastNativeError;
   Future<void>? _initialization;
+  bool _initialConfigurationLoaded = false;
+  int? _knownWallpaperCount;
 
   List<Wallpaper> get wallpapers => UnmodifiableListView(_wallpapers);
   List<WallpaperAlbum> get albums => UnmodifiableListView(_albums);
@@ -42,6 +44,9 @@ class WakeWallController extends ChangeNotifier {
   int get selectedIndex => _selectedIndex;
   ValueListenable<int> get selectedIndexListenable => _selectedIndexNotifier;
   bool get hasWallpapers => _wallpapers.isNotEmpty;
+  bool get isLoadingInitialConfiguration => !_initialConfigurationLoaded;
+  bool get hasStoredWallpapers =>
+      hasWallpapers || (_knownWallpaperCount ?? 0) > 0;
   bool get paused => _paused;
   RotationOrder get order => _order;
   WallpaperFit get fit => _fit;
@@ -64,13 +69,26 @@ class WakeWallController extends ChangeNotifier {
   }
 
   Future<void> _initialize() async {
+    _initialConfigurationLoaded = false;
+    _lastNativeError = null;
+    notifyListeners();
     try {
+      // The small state response reveals whether a library exists before Android
+      // verifies or rebuilds every image preview in the full configuration.
+      try {
+        _applyConfiguration(await _bridge.state());
+        notifyListeners();
+      } catch (_) {
+        // A failed optional fast path must not prevent the complete configuration.
+      }
       _applyConfiguration(await _bridge.configuration());
-      notifyListeners();
     } on MissingPluginException {
       // Non-Android previews use the in-memory defaults.
     } on PlatformException catch (error) {
       _lastNativeError = error.message ?? error.code;
+    } finally {
+      _initialConfigurationLoaded = true;
+      notifyListeners();
     }
   }
 
@@ -433,6 +451,11 @@ class WakeWallController extends ChangeNotifier {
 
   // Rebuilds the Flutter list from Android's saved wallpaper collection.
   void _applyConfiguration(Map<String, Object?> configuration) {
+    final savedWallpaperCount = (configuration['wallpaperCount'] as num?)
+        ?.toInt();
+    if (savedWallpaperCount != null) {
+      _knownWallpaperCount = math.max(0, savedWallpaperCount);
+    }
     _paused = configuration['paused'] as bool? ?? _paused;
     if (configuration.containsKey('shuffle')) {
       _order = configuration['shuffle'] == true
@@ -478,6 +501,7 @@ class WakeWallController extends ChangeNotifier {
       _wallpapers
         ..clear()
         ..addAll(restored);
+      _knownWallpaperCount = _wallpapers.length;
     }
     final savedAlbums = configuration['albums'] as List<Object?>?;
     if (savedAlbums != null) {
@@ -532,6 +556,7 @@ class WakeWallController extends ChangeNotifier {
       final wallpaper = _wallpaperFromNative(value);
       if (wallpaper != null) _wallpapers.add(wallpaper);
     }
+    _knownWallpaperCount = _wallpapers.length;
   }
 
   Wallpaper? _wallpaperFromNative(Object? value) {

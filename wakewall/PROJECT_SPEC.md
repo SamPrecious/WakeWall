@@ -43,6 +43,7 @@ personalisation app, not a technical background utility.
 ## Platform Scope
 
 - Android is the supported platform.
+- The permanent Google Play application ID is `com.sprecious.wakewall`.
 - Samsung devices are a major testing target.
 - The UI is Flutter.
 - The live wallpaper engine, image storage, rendering, Android pickers, and
@@ -221,7 +222,7 @@ Wallpaper scrolling is optional and disabled by default.
 WakeWall creates replaceable cached derivatives rather than modifying originals:
 
 - a full-aspect source preview for crop editing;
-- a 720-pixel-wide main cropped preview for the large Flutter preview;
+- a 1080-pixel-wide main cropped preview for the large Flutter preview;
 - a 180-pixel-wide cropped thumbnail for `Up Next`;
 - a phone-sized finished native wallpaper render;
 - an optional wider scrolling render when scrolling has been enabled.
@@ -306,6 +307,12 @@ placed directly beside the feature it controls.
   usable when Android reduces the safe screen height.
 - Landscape and unusually short app windows may scroll vertically rather than
   shrinking controls or overflowing; normal portrait composition stays fixed.
+- Widths below 600 dp retain the established phone composition. On tablets,
+  the home composition grows within a bounded content width and centres
+  vertically so large or dense displays do not leave a phone-sized cluster at
+  the top of the screen.
+- Tablet bottom sheets and crop controls use bounded centred widths while the
+  crop editor's Cancel and Save actions remain pinned to the screen edges.
 - Bottom-sheet content must reserve the Android bottom safe area so rows and
   buttons never dip under gesture or 3-button navigation.
 - Avoid shifting major layout elements when contextual controls appear.
@@ -316,6 +323,10 @@ placed directly beside the feature it controls.
   native sync or heavier preview work completes.
 - Selected-wallpaper changes should use the lightweight selected-index listener
   rather than forcing a full home-screen rebuild.
+- Startup must not present `Add Wallpapers` until Android has confirmed that the
+  saved library is genuinely empty. A fast wallpaper count reserves the normal
+  populated layout while the heavier preview configuration loads, with delayed
+  progress feedback so normal fast launches do not flash a spinner.
 - Thumbnail taps should update the selected wallpaper immediately; native
   `setCurrent` sync stays asynchronous and must not delay the visible preview.
 - Preview warmup should focus on the selected and nearby wallpapers rather than
@@ -325,8 +336,8 @@ placed directly beside the feature it controls.
   so thumbnail taps feel immediate.
 - Album filter taps keep sheet feedback local and debounce native filter sync so
   the checkmark animation is not competing with wallpaper-list refresh work.
-- User-created album rows expose a small management action as well as retaining
-  long-press access to rename and delete.
+- User-created album rows use long press to expose rename and delete without
+  adding permanent controls to the minimal album list.
 - Settings switch cards are tappable across the complete row, and compact visual
   controls should retain practical Android touch targets where space allows.
 - Crop-editor header actions should keep stable positions.

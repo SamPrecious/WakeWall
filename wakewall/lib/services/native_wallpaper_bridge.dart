@@ -2,7 +2,7 @@ import 'package:flutter/services.dart';
 
 // Wraps the MethodChannel so the controller never deals with raw platform calls.
 class NativeWallpaperBridge {
-  static const _channel = MethodChannel('com.zambl.wakewall/control');
+  static const _channel = MethodChannel('com.sprecious.wakewall/control');
   ValueChanged<ImportProgress>? _onImageImportProgress;
   VoidCallback? _onFileOperationStarted;
 

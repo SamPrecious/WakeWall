@@ -1,4 +1,4 @@
-package com.zambl.wakewall
+package com.sprecious.wakewall
 
 import android.content.BroadcastReceiver
 import android.content.Context
@@ -378,7 +378,20 @@ class WakeWallService : WallpaperService() {
                     Bitmap.createBitmap(frameBufferWidth(frame.width()), frame.height(), Bitmap.Config.ARGB_8888)
                 }.getOrNull()
                 ?: return null
-            drawWallpaper(Canvas(bitmap), currentIndex, activeStore)
+            val rendered = try {
+                drawWallpaper(Canvas(bitmap), currentIndex, activeStore)
+                true
+            } catch (_: Exception) {
+                false
+            } catch (_: OutOfMemoryError) {
+                false
+            }
+            if (!rendered) {
+                bitmap.takeUnless { it.isRecycled }?.recycle()
+                currentFrameBitmap = null
+                currentFrameIndex = -1
+                return null
+            }
             if (bitmap !== existing) {
                 currentFrameBitmap?.takeUnless { it.isRecycled }?.recycle()
             }
@@ -440,6 +453,8 @@ class WakeWallService : WallpaperService() {
                 }
             } catch (_: Exception) {
                 drewFrame = false
+            } catch (_: OutOfMemoryError) {
+                drewFrame = false
             } finally {
                 val posted = canvas != null && runCatching {
                     surfaceHolder.unlockCanvasAndPost(canvas)
@@ -457,6 +472,8 @@ class WakeWallService : WallpaperService() {
                 canvas = lockSurfaceCanvas(useHardware = true)
                 if (canvas != null) drewFrame = drawBootFrame(canvas)
             } catch (_: Exception) {
+                drewFrame = false
+            } catch (_: OutOfMemoryError) {
                 drewFrame = false
             } finally {
                 val posted = canvas != null && runCatching {
@@ -764,7 +781,7 @@ class WakeWallService : WallpaperService() {
     }
 
     companion object {
-        const val ACTION_CONFIGURATION_UPDATED = "com.zambl.wakewall.CONFIGURATION_UPDATED"
-        const val ACTION_CROP_UPDATED = "com.zambl.wakewall.CROP_UPDATED"
+        const val ACTION_CONFIGURATION_UPDATED = "com.sprecious.wakewall.CONFIGURATION_UPDATED"
+        const val ACTION_CROP_UPDATED = "com.sprecious.wakewall.CROP_UPDATED"
     }
 }

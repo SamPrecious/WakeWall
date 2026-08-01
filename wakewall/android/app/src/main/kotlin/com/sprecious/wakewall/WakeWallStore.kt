@@ -1,4 +1,4 @@
-package com.zambl.wakewall
+package com.sprecious.wakewall
 
 import android.content.Context
 import android.content.ContentResolver
@@ -14,6 +14,7 @@ import android.graphics.Point
 import android.net.Uri
 import android.os.Build
 import android.os.Bundle
+import android.system.Os
 import android.provider.OpenableColumns
 import android.provider.MediaStore
 import android.util.Size
@@ -246,6 +247,7 @@ class WakeWallStore(context: Context) {
         val failed = mutableListOf<FailedImport>()
         val imported = mutableListOf<String>()
         val enforceImportCaps = !ultraHighResolutionMode
+        var retainedFallbackBytes = 0L
         uris.forEachIndexed { index, uri ->
             val outcome = importIntoAppStorage(uri, enforceImportCaps)
             outcome.value?.let { value ->
@@ -254,7 +256,13 @@ class WakeWallStore(context: Context) {
                 saveWallpapers(updated)
                 commitImport(value)
                 imported.add(value)
-            } ?: outcome.failure?.let(failed::add)
+            } ?: outcome.failure?.let { failure ->
+                // Keep automatic compatibility recovery without retaining an unbounded batch in RAM.
+                if (retainedFallbackBytes + failure.bytes.size <= MAX_FALLBACK_BYTES) {
+                    failed.add(failure)
+                    retainedFallbackBytes += failure.bytes.size
+                }
+            }
             onProgress(index + 1)
         }
         prefs.edit().putInt("image_format_version", 1).apply()
@@ -520,8 +528,9 @@ class WakeWallStore(context: Context) {
             return false
         }
         val replaced = runCatching {
-            replacement.copyTo(original, overwrite = true)
-            true
+            // Both files share a directory, so POSIX rename replaces the source atomically.
+            Os.rename(replacement.absolutePath, original.absolutePath)
+            original.isFile && original.length() > 0
         }.getOrDefault(false)
         replacement.delete()
         if (replaced) deleteCachedPreviews(value)
@@ -580,6 +589,7 @@ class WakeWallStore(context: Context) {
         // Lightweight state avoids preview bytes for frequent resume/settings refreshes.
         return mapOf(
             "index" to index,
+            "wallpaperCount" to wallpaperCount,
             "paused" to paused,
             "shuffle" to shuffle,
             "fit" to fit,
@@ -864,9 +874,15 @@ class WakeWallStore(context: Context) {
     // Moves older picker-based entries into the same reliable private storage.
     private fun migrateExternalImages() {
         // Older builds stored provider URIs; modern WakeWall keeps private copies.
+        val saved = wallpapers
+        if (prefs.getInt("image_format_version", 0) >= 1 &&
+            saved.all { it.startsWith(LOCAL_PREFIX) }
+        ) {
+            return
+        }
         var changed = false
         val imported = mutableListOf<String>()
-        val migrated = wallpapers.mapNotNull { value ->
+        val migrated = saved.mapNotNull { value ->
             if (value.startsWith(SAMPLE_PREFIX)) {
                 changed = true
                 null
@@ -953,7 +969,7 @@ class WakeWallStore(context: Context) {
         }
         ensureWallpaperRenderFile(value, scrolling = false)
         if (wallpaperScrolling) ensureWallpaperRenderFile(value, scrolling = true)
-        croppedPreview(value, MAIN_PREVIEW_WIDTH, 92, "main_crop_v2")?.let {
+        croppedPreview(value, MAIN_PREVIEW_WIDTH, 96, "main_crop_v3")?.let {
             result["mainPreview"] = it
         }
         croppedPreview(value, SMALL_PREVIEW_WIDTH, 84, "small_crop_v2")?.let {
@@ -1784,7 +1800,8 @@ class WakeWallStore(context: Context) {
         private const val MAX_IMAGE_EDGE = 6144f
         private const val VALIDATION_IMAGE_EDGE = 2048f
         private const val SMALL_PREVIEW_WIDTH = 180
-        private const val MAIN_PREVIEW_WIDTH = 720
+        // Matches the physical width of the large Flutter card on high-density phones.
+        private const val MAIN_PREVIEW_WIDTH = 1080
         private const val SOURCE_PREVIEW_EDGE = 1920f
         private const val WALLPAPER_RENDER_SUFFIX = "wallpaper_crop_v1"
         private val LEGACY_SCROLLING_RENDER_SUFFIXES =
@@ -1793,6 +1810,7 @@ class WakeWallStore(context: Context) {
         const val SCROLLING_WIDTH_MULTIPLIER = 1.5f
         private const val SAMPLE_PREFIX = "sample:"
         private const val LOCAL_PREFIX = "local:"
+        // Keep the original format ID so pre-release backups remain restorable.
         private const val BACKUP_FORMAT = "com.zambl.wakewall.backup"
         private const val MAX_BACKUP_WALLPAPERS = 1000
         private const val MAX_BACKUP_MANIFEST_BYTES = 1024L * 1024

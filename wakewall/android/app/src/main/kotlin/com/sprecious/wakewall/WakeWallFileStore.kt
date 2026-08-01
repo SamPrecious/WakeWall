@@ -1,4 +1,4 @@
-package com.zambl.wakewall
+package com.sprecious.wakewall
 
 import android.content.Context
 import android.net.Uri
@@ -52,11 +52,13 @@ class WakeWallFileStore(
             if (file.isFile && file.name !in retainedLocalNames) file.delete()
         }
 
-        val retainedPreviewPrefixes = retained.flatMap { value ->
-            listOf("${storageKey(value)}_", "${value.hashCode()}_")
-        }
+        val retainedPreviewNames = retained.flatMap { value ->
+            CURRENT_PREVIEW_SUFFIXES.map { suffix ->
+                "${storageKey(value)}_$suffix.jpg"
+            }
+        }.toSet()
         previewDirectory().listFiles()?.forEach { file ->
-            if (file.isFile && retainedPreviewPrefixes.none(file.name::startsWith)) {
+            if (file.isFile && file.name !in retainedPreviewNames) {
                 file.delete()
             }
         }
@@ -108,17 +110,20 @@ class WakeWallFileStore(
     companion object {
         const val IMPORT_STAGING_DIRECTORY = "wallpaper_imports"
         private const val LOCAL_PREFIX = "local:"
-        private val PREVIEW_SUFFIXES = listOf(
+        private val CURRENT_PREVIEW_SUFFIXES = listOf(
+            "source",
+            "small_crop_v2",
+            "main_crop_v3",
+            "wallpaper_crop_v1",
+            "wallpaper_scroll_v3",
+        )
+        private val PREVIEW_SUFFIXES = CURRENT_PREVIEW_SUFFIXES + listOf(
             "small",
             "main",
-            "source",
             "large",
-            "small_crop_v2",
             "main_crop_v2",
-            "wallpaper_crop_v1",
             "wallpaper_scroll_v1",
             "wallpaper_scroll_v2",
-            "wallpaper_scroll_v3",
         )
     }
 }

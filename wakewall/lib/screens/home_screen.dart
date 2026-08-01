@@ -14,6 +14,9 @@ import '../widgets/abstract_wallpaper.dart';
 import '../widgets/wakewall_notice.dart';
 
 const _wallpaperStripHeaderHeight = 34.0;
+const _tabletLayoutBreakpoint = 600.0;
+const _tabletHomeMaxWidth = 900.0;
+const _tabletSheetMaxWidth = 680.0;
 
 void _wakeWallTapHaptic() {
   HapticFeedback.selectionClick();
@@ -132,42 +135,85 @@ class _HomeScreenState extends State<HomeScreen> {
                     final bottomInset = MediaQuery.viewPaddingOf(
                       context,
                     ).bottom;
-                    final horizontalPadding = constraints.maxWidth < 420
+                    final landscape =
+                        constraints.maxWidth > constraints.maxHeight;
+                    final tablet =
+                        constraints.maxWidth >= _tabletLayoutBreakpoint;
+                    final hasWallpaperLayout = controller.hasStoredWallpapers;
+                    final horizontalPadding = tablet
+                        ? constraints.maxWidth < 720
+                              ? 32.0
+                              : 40.0
+                        : constraints.maxWidth < 420
                         ? 20.0
                         : 28.0;
-                    final headerHeight = 60.0;
+                    final headerHeight = tablet
+                        ? landscape
+                              ? 72.0
+                              : (constraints.maxWidth * .10)
+                                    .clamp(68.0, 82.0)
+                                    .toDouble()
+                        : 60.0;
+                    final stripHeaderHeight = tablet
+                        ? landscape
+                              ? 38.0
+                              : 40.0
+                        : _wallpaperStripHeaderHeight;
                     final bottomGap = bottomInset > 24 ? 10.0 : 18.0;
                     final usableHeight =
                         constraints.maxHeight - headerHeight - bottomGap;
-                    final minimumPreviewHeight = controller.hasWallpapers
+                    final minimumPreviewHeight = hasWallpaperLayout
                         ? 300.0
                         : 340.0;
                     // Size the thumbnail row first so the main preview gets the remaining space.
-                    final targetTileHeight = (usableHeight * .1356)
-                        .clamp(96.6, 107.6)
-                        .toDouble();
+                    final targetTileHeight = tablet
+                        ? landscape
+                              ? 112.0
+                              : (constraints.maxWidth * .20)
+                                    .clamp(120.0, 150.0)
+                                    .toDouble()
+                        : (usableHeight * .1356).clamp(96.6, 107.6).toDouble();
                     final targetCollectionHeight =
-                        _wallpaperStripHeaderHeight + targetTileHeight;
+                        stripHeaderHeight + targetTileHeight;
                     final maximumCollectionHeight = math.max(
                       112.0,
                       usableHeight - minimumPreviewHeight,
                     );
-                    final collectionHeight = controller.hasWallpapers
+                    final collectionHeight = hasWallpaperLayout
                         ? targetCollectionHeight
                               .clamp(112.0, maximumCollectionHeight)
                               .toDouble()
                         : 0.0;
                     // Reserve the collection first so navigation bars cannot squash it.
-                    final landscape =
-                        constraints.maxWidth > constraints.maxHeight;
-                    final previewMinimum = controller.hasWallpapers
-                        ? landscape
+                    final previewMinimum = hasWallpaperLayout
+                        ? tablet
+                              ? landscape
+                                    ? 360.0
+                                    : 420.0
+                              : landscape
                               ? 370.0
                               : 260.0
+                        : tablet
+                        ? 420.0
                         : 320.0;
-                    final previewHeight = (usableHeight - collectionHeight)
-                        .clamp(previewMinimum, 680.0)
-                        .toDouble();
+                    final phoneRatio = _wakeWallPhoneRatio(context);
+                    final tabletPreviewMaxWidth = math.min(
+                      constraints.maxWidth * .72,
+                      620.0,
+                    );
+                    final availablePreviewHeight =
+                        usableHeight - collectionHeight;
+                    final previewHeight = tablet
+                        ? math
+                              .min(
+                                availablePreviewHeight,
+                                tabletPreviewMaxWidth / phoneRatio,
+                              )
+                              .clamp(previewMinimum, double.infinity)
+                              .toDouble()
+                        : availablePreviewHeight
+                              .clamp(previewMinimum, 680.0)
+                              .toDouble();
                     final contentHeight =
                         headerHeight +
                         previewHeight +
@@ -175,13 +221,25 @@ class _HomeScreenState extends State<HomeScreen> {
                         bottomGap;
                     final needsVerticalScroll =
                         contentHeight > constraints.maxHeight;
+                    final contentWidth = tablet
+                        ? math.min(constraints.maxWidth, _tabletHomeMaxWidth)
+                        : constraints.maxWidth;
+                    final stripHorizontalPadding = tablet
+                        ? (constraints.maxWidth - contentWidth) / 2 +
+                              horizontalPadding
+                        : horizontalPadding;
+                    final tabletTitleSize = tablet
+                        ? (constraints.maxWidth * .057)
+                              .clamp(42.0, 48.0)
+                              .toDouble()
+                        : null;
 
-                    final content = Padding(
+                    final contentBody = Padding(
                       padding: EdgeInsets.symmetric(
                         horizontal: horizontalPadding,
                       ),
                       child: Column(
-                        mainAxisSize: needsVerticalScroll
+                        mainAxisSize: tablet || needsVerticalScroll
                             ? MainAxisSize.min
                             : MainAxisSize.max,
                         children: [
@@ -190,6 +248,8 @@ class _HomeScreenState extends State<HomeScreen> {
                             child: _Header(
                               onAlbums: () => _showAlbums(context),
                               onSettings: () => _showSettings(context),
+                              titleFontSize: tabletTitleSize,
+                              actionIconSize: tablet ? 26 : 22,
                             ),
                           ),
                           SizedBox(
@@ -200,6 +260,9 @@ class _HomeScreenState extends State<HomeScreen> {
                                 child: _Preview(
                                   controller: controller,
                                   maximumHeight: previewHeight,
+                                  maximumWidth: tablet
+                                      ? tabletPreviewMaxWidth
+                                      : null,
                                   draggingWallpaper: draggingWallpaper,
                                   onRemoveWallpaper: _removeWallpaper,
                                   onAdd: _addImages,
@@ -224,33 +287,63 @@ class _HomeScreenState extends State<HomeScreen> {
                               ),
                             ),
                           ),
-                          if (controller.hasWallpapers)
+                          if (hasWallpaperLayout)
                             SizedBox(
                               height: collectionHeight,
                               child: RepaintBoundary(
-                                child: _WallpaperStrip(
-                                  controller: controller,
-                                  horizontalPadding: horizontalPadding,
-                                  onAdd: _addImages,
-                                  onDragChanged: (dragging) {
-                                    if (draggingWallpaper == dragging) return;
-                                    setState(
-                                      () => draggingWallpaper = dragging,
-                                    );
-                                  },
-                                ),
+                                child: controller.hasWallpapers
+                                    ? _WallpaperStrip(
+                                        controller: controller,
+                                        horizontalPadding:
+                                            stripHorizontalPadding,
+                                        headerHeight: stripHeaderHeight,
+                                        labelFontSize: tablet ? 18 : 15.5,
+                                        onAdd: _addImages,
+                                        onDragChanged: (dragging) {
+                                          if (draggingWallpaper == dragging) {
+                                            return;
+                                          }
+                                          setState(
+                                            () => draggingWallpaper = dragging,
+                                          );
+                                        },
+                                      )
+                                    : _LoadingWallpaperStrip(
+                                        headerHeight: stripHeaderHeight,
+                                        labelFontSize: tablet ? 18 : 15.5,
+                                      ),
                               ),
                             ),
                           SizedBox(height: bottomGap),
                         ],
                       ),
                     );
-                    if (!needsVerticalScroll) return content;
+                    if (tablet && !needsVerticalScroll) {
+                      return Align(
+                        alignment: Alignment.center,
+                        child: SizedBox(
+                          key: const ValueKey('tablet-home-content'),
+                          width: contentWidth,
+                          height: contentHeight,
+                          child: contentBody,
+                        ),
+                      );
+                    }
+                    if (!needsVerticalScroll) return contentBody;
                     // Landscape and unusually short windows scroll instead of overflowing.
                     return SingleChildScrollView(
                       key: const ValueKey('short-screen-home-scroll'),
                       physics: const ClampingScrollPhysics(),
-                      child: content,
+                      child: tablet
+                          ? Align(
+                              alignment: Alignment.topCenter,
+                              child: SizedBox(
+                                width: contentWidth,
+                                height: contentHeight,
+                                child: contentBody,
+                              ),
+                            )
+                          : contentBody,
                     );
                   },
                 ),
@@ -279,6 +372,7 @@ class _HomeScreenState extends State<HomeScreen> {
       context: context,
       isScrollControlled: true,
       useSafeArea: true,
+      constraints: _tabletBottomSheetConstraints(context),
       builder: (_) => _SettingsSheet(controller: controller),
     );
   }
@@ -290,6 +384,7 @@ class _HomeScreenState extends State<HomeScreen> {
       context: context,
       isScrollControlled: true,
       useSafeArea: true,
+      constraints: _tabletBottomSheetConstraints(context),
       builder: (_) => _AlbumsSheet(controller: controller),
     );
   }
@@ -303,6 +398,7 @@ class _HomeScreenState extends State<HomeScreen> {
       context: context,
       isScrollControlled: true,
       useSafeArea: true,
+      constraints: _tabletBottomSheetConstraints(context),
       builder: (_) => _AssignAlbumsSheet(
         controller: controller,
         wallpapers: [wallpaper],
@@ -344,6 +440,7 @@ class _HomeScreenState extends State<HomeScreen> {
         context: context,
         isScrollControlled: true,
         useSafeArea: true,
+        constraints: _tabletBottomSheetConstraints(context),
         builder: (_) => const _AddSourceSheet(),
       );
       if (choice == null || !mounted) return;
@@ -401,6 +498,7 @@ class _HomeScreenState extends State<HomeScreen> {
               context: context,
               isScrollControlled: true,
               useSafeArea: true,
+              constraints: _tabletBottomSheetConstraints(context),
               isDismissible: false,
               enableDrag: false,
               builder: (_) => _AssignAlbumsSheet(
@@ -546,10 +644,17 @@ class _OperationOverlay extends StatelessWidget {
 
 // Top row containing the app wordmark and the two global navigation buttons.
 class _Header extends StatelessWidget {
-  const _Header({required this.onAlbums, required this.onSettings});
+  const _Header({
+    required this.onAlbums,
+    required this.onSettings,
+    required this.actionIconSize,
+    this.titleFontSize,
+  });
 
   final VoidCallback onAlbums;
   final VoidCallback onSettings;
+  final double actionIconSize;
+  final double? titleFontSize;
 
   @override
   Widget build(BuildContext context) {
@@ -565,9 +670,10 @@ class _Header extends StatelessWidget {
               fit: BoxFit.scaleDown,
               child: Text(
                 'WakeWall',
-                style: Theme.of(
-                  context,
-                ).textTheme.displaySmall?.copyWith(color: titleColor),
+                style: Theme.of(context).textTheme.displaySmall?.copyWith(
+                  color: titleColor,
+                  fontSize: titleFontSize,
+                ),
               ),
             ),
           ),
@@ -578,6 +684,7 @@ class _Header extends StatelessWidget {
             icon: Icons.settings_outlined,
             tooltip: 'Settings',
             onTap: onSettings,
+            iconSize: actionIconSize,
           ),
         ),
         Positioned(
@@ -586,6 +693,7 @@ class _Header extends StatelessWidget {
             icon: Icons.photo_library_outlined,
             tooltip: 'Albums',
             onTap: onAlbums,
+            iconSize: actionIconSize,
           ),
         ),
       ],
@@ -599,11 +707,13 @@ class _HeaderActionButton extends StatelessWidget {
     required this.icon,
     required this.tooltip,
     required this.onTap,
+    required this.iconSize,
   });
 
   final IconData icon;
   final String tooltip;
   final VoidCallback onTap;
+  final double iconSize;
 
   @override
   Widget build(BuildContext context) {
@@ -630,7 +740,7 @@ class _HeaderActionButton extends StatelessWidget {
                   borderRadius: BorderRadius.circular(13),
                   border: Border.all(color: Colors.transparent),
                 ),
-                child: Icon(icon, color: iconColor, size: 22),
+                child: Icon(icon, color: iconColor, size: iconSize),
               ),
             ),
           ),
@@ -645,6 +755,7 @@ class _Preview extends StatelessWidget {
   const _Preview({
     required this.controller,
     required this.maximumHeight,
+    this.maximumWidth,
     required this.draggingWallpaper,
     required this.onRemoveWallpaper,
     required this.onAdd,
@@ -655,6 +766,7 @@ class _Preview extends StatelessWidget {
 
   final WakeWallController controller;
   final double maximumHeight;
+  final double? maximumWidth;
   final bool draggingWallpaper;
   final Future<void> Function(int) onRemoveWallpaper;
   final VoidCallback onAdd;
@@ -666,13 +778,15 @@ class _Preview extends StatelessWidget {
   Widget build(BuildContext context) {
     final colors = context.wakeWallColors;
     final phoneRatio = _wakeWallPhoneRatio(context);
-    final availableWidth = MediaQuery.sizeOf(context).width - 40;
+    final availableWidth =
+        maximumWidth ?? MediaQuery.sizeOf(context).width - 40;
     final heightFromWidth = availableWidth / phoneRatio;
     final height = heightFromWidth.clamp(0, maximumHeight).toDouble();
     final width = height * phoneRatio;
     const radius = BorderRadius.all(Radius.circular(22));
 
     return AnimatedContainer(
+      key: const ValueKey('wakewall-main-preview'),
       duration: const Duration(milliseconds: 380),
       curve: Curves.easeOutCubic,
       width: width,
@@ -681,7 +795,7 @@ class _Preview extends StatelessWidget {
         color: colors.background,
         borderRadius: radius,
         border: Border.all(
-          color: controller.hasWallpapers
+          color: controller.hasStoredWallpapers
               ? colors.outline.withValues(alpha: .25)
               : colors.outline,
         ),
@@ -694,7 +808,11 @@ class _Preview extends StatelessWidget {
             duration: const Duration(milliseconds: 420),
             switchInCurve: Curves.easeOutCubic,
             switchOutCurve: Curves.easeInCubic,
-            child: controller.hasWallpapers
+            child: controller.isLoadingInitialConfiguration
+                ? const _InitialLoadingPreview(
+                    key: ValueKey('initial-wallpaper-loading'),
+                  )
+                : controller.hasWallpapers
                 ? ValueListenableBuilder<int>(
                     key: const ValueKey('populated'),
                     valueListenable: controller.selectedIndexListenable,
@@ -778,6 +896,11 @@ class _Preview extends StatelessWidget {
                         ],
                       );
                     },
+                  )
+                : controller.hasStoredWallpapers
+                ? _UnavailablePreview(
+                    key: const ValueKey('wallpaper-load-failed'),
+                    onRetry: () => unawaited(controller.initialize()),
                   )
                 : _EmptyPreview(key: const ValueKey('empty'), onAdd: onAdd),
           ),
@@ -878,6 +1001,99 @@ class _PausedPreviewButton extends StatelessWidget {
   }
 }
 
+// Avoids presenting a false empty library while Android reloads image previews.
+class _InitialLoadingPreview extends StatefulWidget {
+  const _InitialLoadingPreview({super.key});
+
+  @override
+  State<_InitialLoadingPreview> createState() => _InitialLoadingPreviewState();
+}
+
+class _InitialLoadingPreviewState extends State<_InitialLoadingPreview> {
+  Timer? indicatorTimer;
+  bool showIndicator = false;
+
+  @override
+  void initState() {
+    super.initState();
+    // Normal launches should transition straight to the wallpaper without a flash.
+    indicatorTimer = Timer(const Duration(milliseconds: 280), () {
+      if (mounted) setState(() => showIndicator = true);
+    });
+  }
+
+  @override
+  void dispose() {
+    indicatorTimer?.cancel();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final colors = context.wakeWallColors;
+    return Center(
+      child: AnimatedOpacity(
+        key: const ValueKey('initial-loading-indicator'),
+        duration: const Duration(milliseconds: 160),
+        opacity: showIndicator ? 1 : 0,
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            SizedBox(
+              width: 28,
+              height: 28,
+              child: CircularProgressIndicator(
+                strokeWidth: 2.4,
+                color: colors.tealStrong,
+              ),
+            ),
+            const SizedBox(height: 14),
+            Text(
+              'Loading Wallpapers',
+              style: Theme.of(
+                context,
+              ).textTheme.titleMedium?.copyWith(color: colors.muted),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+// Keeps a known library distinct from the genuine first-use empty state after an error.
+class _UnavailablePreview extends StatelessWidget {
+  const _UnavailablePreview({required this.onRetry, super.key});
+
+  final VoidCallback onRetry;
+
+  @override
+  Widget build(BuildContext context) {
+    final colors = context.wakeWallColors;
+    return Center(
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Icon(Icons.sync_problem_rounded, color: colors.muted, size: 28),
+          const SizedBox(height: 10),
+          Text(
+            'Wallpapers Could Not Be Loaded',
+            style: Theme.of(
+              context,
+            ).textTheme.titleMedium?.copyWith(color: colors.muted),
+          ),
+          const SizedBox(height: 8),
+          TextButton.icon(
+            onPressed: onRetry,
+            icon: const Icon(Icons.refresh_rounded),
+            label: const Text('Retry'),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
 // Empty-state preview that acts as one large add-wallpapers target.
 class _EmptyPreview extends StatelessWidget {
   const _EmptyPreview({required this.onAdd, super.key});
@@ -948,17 +1164,86 @@ class _OverlayButton extends StatelessWidget {
   }
 }
 
+// Reserves the populated strip geometry while native previews are still loading.
+class _LoadingWallpaperStrip extends StatelessWidget {
+  const _LoadingWallpaperStrip({
+    required this.headerHeight,
+    required this.labelFontSize,
+  });
+
+  final double headerHeight;
+  final double labelFontSize;
+
+  @override
+  Widget build(BuildContext context) {
+    final colors = context.wakeWallColors;
+    return Opacity(
+      key: const ValueKey('initial-wallpaper-strip'),
+      opacity: .48,
+      child: Column(
+        children: [
+          SizedBox(
+            height: headerHeight,
+            child: Align(
+              alignment: Alignment.centerLeft,
+              child: Text(
+                'Up Next',
+                style: Theme.of(context).textTheme.labelLarge?.copyWith(
+                  color: colors.muted,
+                  fontSize: labelFontSize,
+                  letterSpacing: 1.2,
+                ),
+              ),
+            ),
+          ),
+          Expanded(
+            child: LayoutBuilder(
+              builder: (context, constraints) {
+                final fullTileHeight = constraints.maxHeight;
+                final tileHeight = fullTileHeight * .85;
+                final tileWidth = fullTileHeight * _wakeWallPhoneRatio(context);
+                return Align(
+                  alignment: Alignment.topLeft,
+                  child: Row(
+                    children: [
+                      for (var index = 0; index < 5; index++) ...[
+                        if (index > 0) const SizedBox(width: 5.6),
+                        Container(
+                          width: tileWidth,
+                          height: tileHeight,
+                          decoration: BoxDecoration(
+                            color: colors.raisedSurface,
+                            borderRadius: BorderRadius.circular(10.5),
+                          ),
+                        ),
+                      ],
+                    ],
+                  ),
+                );
+              },
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
 // Horizontal queue of wallpapers plus the Add action.
 class _WallpaperStrip extends StatefulWidget {
   const _WallpaperStrip({
     required this.controller,
     required this.horizontalPadding,
+    required this.headerHeight,
+    required this.labelFontSize,
     required this.onAdd,
     required this.onDragChanged,
   });
 
   final WakeWallController controller;
   final double horizontalPadding;
+  final double headerHeight;
+  final double labelFontSize;
   final VoidCallback onAdd;
   final ValueChanged<bool> onDragChanged;
 
@@ -1022,9 +1307,13 @@ class _WallpaperStripState extends State<_WallpaperStrip> {
     final preview = wallpapers[index].preview;
     final mainPreview = wallpapers[index].mainPreview;
     if (mainPreview != null) {
-      precacheImage(MemoryImage(mainPreview), context);
+      unawaited(
+        precacheImage(MemoryImage(mainPreview), context, onError: (_, _) {}),
+      );
     } else if (preview != null) {
-      precacheImage(MemoryImage(preview), context);
+      unawaited(
+        precacheImage(MemoryImage(preview), context, onError: (_, _) {}),
+      );
     }
   }
 
@@ -1042,7 +1331,6 @@ class _WallpaperStripState extends State<_WallpaperStrip> {
     final serial = ++selectionSerial;
     // Show selection feedback immediately while Android catches up.
     previewSelection(index);
-    warmPreview(index);
     unawaited(
       controller.select(index).whenComplete(() {
         if (mounted && serial == selectionSerial) {
@@ -1070,9 +1358,10 @@ class _WallpaperStripState extends State<_WallpaperStrip> {
   Widget build(BuildContext context) {
     final colors = context.wakeWallColors;
     final headingColor = _wakeWallProminentTextColor(context);
-    final stripLabelStyle = Theme.of(
-      context,
-    ).textTheme.labelLarge?.copyWith(fontSize: 15.5, letterSpacing: 1.2);
+    final stripLabelStyle = Theme.of(context).textTheme.labelLarge?.copyWith(
+      fontSize: widget.labelFontSize,
+      letterSpacing: 1.2,
+    );
     return ValueListenableBuilder<int>(
       valueListenable: controller.selectedIndexListenable,
       builder: (context, selectedIndex, _) {
@@ -1080,7 +1369,7 @@ class _WallpaperStripState extends State<_WallpaperStrip> {
         return Column(
           children: [
             SizedBox(
-              height: _wallpaperStripHeaderHeight,
+              height: widget.headerHeight,
               child: Row(
                 children: [
                   Text(
@@ -1193,8 +1482,10 @@ class _WallpaperStripState extends State<_WallpaperStrip> {
                                     hint:
                                         'Double tap to preview. Long press to reorder or remove.',
                                     child: Listener(
-                                      onPointerDown: (_) =>
-                                          previewSelection(index),
+                                      onPointerDown: (_) {
+                                        previewSelection(index);
+                                        warmPreview(index);
+                                      },
                                       onPointerCancel: (_) =>
                                           cancelPreviewSelection(),
                                       child: GestureDetector(
@@ -1348,7 +1639,6 @@ class _AlbumsSheetState extends State<_AlbumsSheet> {
               selected: visibleActiveAlbumIds.contains(album.id),
               onTap: () => _toggle(album.id),
               onLongPress: () => _manageAlbum(album),
-              onManage: () => _manageAlbum(album),
             ),
           if (controller.albums.isEmpty) ...[
             const SizedBox(height: 16),
@@ -1399,6 +1689,7 @@ class _AlbumsSheetState extends State<_AlbumsSheet> {
     // Long-press actions keep album management out of the main sheet.
     final action = await showModalBottomSheet<String>(
       context: context,
+      constraints: _tabletBottomSheetConstraints(context),
       builder: (context) => SafeArea(
         child: Wrap(
           children: [
@@ -1607,14 +1898,12 @@ class _AlbumFilterTile extends StatelessWidget {
     required this.selected,
     required this.onTap,
     this.onLongPress,
-    this.onManage,
   });
   final String title;
   final IconData icon;
   final bool selected;
   final VoidCallback onTap;
   final VoidCallback? onLongPress;
-  final VoidCallback? onManage;
 
   @override
   Widget build(BuildContext context) {
@@ -1676,27 +1965,6 @@ class _AlbumFilterTile extends StatelessWidget {
                       color: selected ? colors.tealStrong : colors.muted,
                     ),
                   ),
-                  if (onManage != null) ...[
-                    const SizedBox(width: 4),
-                    IconButton(
-                      tooltip: 'Manage $title',
-                      visualDensity: VisualDensity.compact,
-                      constraints: const BoxConstraints.tightFor(
-                        width: 40,
-                        height: 40,
-                      ),
-                      padding: EdgeInsets.zero,
-                      onPressed: () {
-                        _wakeWallTapHaptic();
-                        onManage!();
-                      },
-                      icon: Icon(
-                        Icons.more_vert_rounded,
-                        color: colors.muted,
-                        size: 21,
-                      ),
-                    ),
-                  ],
                 ],
               ),
             ),
@@ -1720,6 +1988,11 @@ EdgeInsets _bottomSheetPadding(
     right,
     24 + MediaQuery.viewPaddingOf(context).bottom,
   );
+}
+
+BoxConstraints? _tabletBottomSheetConstraints(BuildContext context) {
+  if (MediaQuery.sizeOf(context).width < _tabletLayoutBreakpoint) return null;
+  return const BoxConstraints(maxWidth: _tabletSheetMaxWidth);
 }
 
 // Compares album sets without caring about selection order.
@@ -1801,6 +2074,7 @@ class _SettingsSheetState extends State<_SettingsSheet> {
         return Stack(
           children: [
             SingleChildScrollView(
+              key: const ValueKey('settings-sheet-content'),
               padding: _bottomSheetPadding(
                 context,
                 left: 22,
@@ -2388,30 +2662,32 @@ class _SwitchTile extends StatelessWidget {
                   child: Column(
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
-                      Wrap(
-                        spacing: 8,
-                        runSpacing: 4,
-                        crossAxisAlignment: WrapCrossAlignment.center,
-                        children: [
-                          Text(
-                            label,
-                            style: Theme.of(
-                              context,
-                            ).textTheme.labelLarge?.copyWith(color: labelColor),
-                          ),
-                          if (badge != null)
-                            _StatusPill(
-                              label: badge!,
-                              icon: Icons.science_outlined,
-                            ),
-                        ],
-                      ),
-                      const SizedBox(height: 3),
                       Text(
-                        description,
+                        label,
                         style: Theme.of(
                           context,
-                        ).textTheme.bodySmall?.copyWith(color: colors.muted),
+                        ).textTheme.labelLarge?.copyWith(color: labelColor),
+                      ),
+                      const SizedBox(height: 3),
+                      Text.rich(
+                        TextSpan(
+                          children: [
+                            if (badge != null)
+                              TextSpan(
+                                text: '$badge · ',
+                                style: Theme.of(context).textTheme.bodySmall
+                                    ?.copyWith(
+                                      color: colors.tealStrong,
+                                      fontWeight: FontWeight.w700,
+                                    ),
+                              ),
+                            TextSpan(
+                              text: description,
+                              style: Theme.of(context).textTheme.bodySmall
+                                  ?.copyWith(color: colors.muted),
+                            ),
+                          ],
+                        ),
                       ),
                     ],
                   ),
@@ -2472,6 +2748,7 @@ class _StatusPill extends StatelessWidget {
         borderRadius: BorderRadius.circular(20),
       ),
       child: Row(
+        mainAxisSize: MainAxisSize.min,
         children: [
           Icon(icon, size: 14, color: colors.muted),
           const SizedBox(width: 5),
