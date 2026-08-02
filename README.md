@@ -412,7 +412,7 @@ build/app/outputs/flutter-apk/WakeWall.apk
 
 ## Current Status
 
-WakeWall is a working Android prototype with:
+WakeWall is a working Android app currently in closed beta testing on Google Play, with:
 
 - a native live wallpaper engine;
 - automatic screen-off wallpaper rotation;
@@ -425,9 +425,8 @@ WakeWall is a working Android prototype with:
 
 Before a broader public release, the main remaining work is:
 
+- completing the required closed-testing period and applying for production access;
 - more device testing across Android versions, launchers, and OEMs;
-- final release signing configuration;
-- Play Store privacy and listing copy;
 - long-run storage and battery validation;
 - final UI polish from tester feedback.
 
@@ -436,3 +435,13 @@ Before a broader public release, the main remaining work is:
 WakeWall is built around a narrow product promise: make home-screen wallpaper rotation feel native, polished, and effortless on Android.
 
 The technical challenge is not simply displaying images. The challenge is doing it at the right moment, with good crop control, without visible wake delay, without wasting battery, and without turning a simple personalisation app into a background utility.
+
+## Early Access
+
+WakeWall is now available to invited testers through a closed beta release on Google Play. This early-access release is being used to gather feedback and test the app on a wider range of Android devices before its public launch.
+
+<p align="center">
+  <a href="docs/screenshots/wakewall-google-play-early-access.jpg">
+    <img src="docs/screenshots/wakewall-google-play-early-access.jpg" width="700" alt="WakeWall Early Access release installed through Google Play">
+  </a>
+</p>
