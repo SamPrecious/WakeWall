@@ -486,6 +486,71 @@ void main() {
     expect(find.bySemanticsLabel('Tidal, wallpaper 1 of 4'), findsOneWidget);
   });
 
+  testWidgets('rapid thumbnail taps keep only the latest selection visible', (
+    tester,
+  ) async {
+    final bridge = _DelayedSelectionBridge();
+    final controller = WakeWallController(bridge: bridge);
+    await tester.pumpWidget(WakeWallApp(controller: controller));
+    await tester.pumpAndSettle();
+
+    Color borderColor(String id) {
+      final tile = tester.widget<Container>(
+        find.byKey(ValueKey('wallpaper-thumbnail-$id')),
+      );
+      final decoration = tile.decoration! as BoxDecoration;
+      return (decoration.border! as Border).top.color;
+    }
+
+    await tester.tap(find.byKey(const ValueKey('wallpaper-thumbnail-silver')));
+    await tester.pump();
+    await tester.tap(find.byKey(const ValueKey('wallpaper-thumbnail-depth')));
+    await tester.pump();
+
+    expect(controller.selectedIndex, 2);
+    expect(borderColor('tidal'), Colors.transparent);
+    expect(borderColor('silver'), Colors.transparent);
+    expect(borderColor('depth'), isNot(Colors.transparent));
+
+    bridge.completeFirstSelection();
+    await tester.pump();
+    expect(controller.selectedIndex, 2);
+    expect(borderColor('depth'), isNot(Colors.transparent));
+
+    bridge.completeSelections();
+    await tester.pumpAndSettle();
+  });
+
+  testWidgets('thumbnail press updates the large preview before selection', (
+    tester,
+  ) async {
+    final controller = WakeWallController(bridge: _PopulatedBridge());
+    await tester.pumpWidget(WakeWallApp(controller: controller));
+    await tester.pumpAndSettle();
+
+    AbstractWallpaper largeWallpaper() => tester.widget<AbstractWallpaper>(
+      find.descendant(
+        of: find.byKey(const ValueKey('wakewall-main-preview')),
+        matching: find.byType(AbstractWallpaper),
+      ),
+    );
+
+    expect(largeWallpaper().wallpaper.id, 'tidal');
+    final gesture = await tester.startGesture(
+      tester.getCenter(
+        find.byKey(const ValueKey('wallpaper-thumbnail-silver')),
+      ),
+    );
+    await tester.pump();
+
+    expect(controller.selectedIndex, 0);
+    expect(largeWallpaper().wallpaper.id, 'silver');
+
+    await gesture.up();
+    await tester.pump();
+    expect(controller.selectedIndex, 1);
+  });
+
   const responsiveViewports = [
     (name: 'phone', size: Size(412, 892), tablet: false),
     (name: 'compact tablet', size: Size(600, 960), tablet: true),
@@ -660,6 +725,50 @@ void main() {
 
     expect(tester.takeException(), isNull);
     expect(tester.widget<Image>(find.byType(Image)).fit, BoxFit.cover);
+  });
+
+  testWidgets('missing main preview loads without enlarging its thumbnail', (
+    tester,
+  ) async {
+    final bridge = _ImagePreviewBridge();
+    final controller = WakeWallController(bridge: bridge);
+    await tester.pumpWidget(WakeWallApp(controller: controller));
+    await tester.pumpAndSettle();
+
+    final gesture = await tester.startGesture(
+      tester.getCenter(
+        find.byKey(const ValueKey('wallpaper-thumbnail-local:second.jpg')),
+      ),
+    );
+    await tester.pump();
+
+    expect(find.byKey(const ValueKey('main-preview-loading')), findsOneWidget);
+    expect(
+      find.descendant(
+        of: find.byKey(const ValueKey('wakewall-main-preview')),
+        matching: find.byType(Image),
+      ),
+      findsNothing,
+    );
+    expect(bridge.mainPreviewRequests, 1);
+
+    bridge.completeMainPreview();
+    await tester.pump();
+    await tester.pump();
+    final largeImage = tester.widget<Image>(
+      find.descendant(
+        of: find.byKey(const ValueKey('wakewall-main-preview')),
+        matching: find.byType(Image),
+      ),
+    );
+    expect(
+      (largeImage.image as MemoryImage).bytes,
+      same(bridge.secondMainPreview),
+    );
+
+    await gesture.up();
+    await tester.pump();
+    expect(bridge.mainPreviewRequests, 1);
   });
 
   testWidgets('damaged preview bytes show a clear fallback', (tester) async {
@@ -863,6 +972,55 @@ void main() {
     expect(find.byTooltip('Adjust Crop'), findsOneWidget);
   });
 
+  testWidgets('crop editor loads its full source only when opened', (
+    tester,
+  ) async {
+    final bridge = _LazyEditorPreviewBridge();
+    final controller = WakeWallController(bridge: bridge);
+    await tester.pumpWidget(WakeWallApp(controller: controller));
+    await tester.pumpAndSettle();
+
+    expect(bridge.editorPreviewRequests, 0);
+    await tester.tap(find.byTooltip('Adjust Crop'));
+    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 500));
+
+    expect(find.text('Adjust Wallpaper'), findsOneWidget);
+    expect(bridge.editorPreviewRequests, 1);
+    expect(
+      find.byKey(const ValueKey('crop-editor-preview-loading')),
+      findsOneWidget,
+    );
+    expect(
+      tester
+          .widget<TextButton>(find.byKey(const ValueKey('crop-editor-save')))
+          .onPressed,
+      isNull,
+    );
+
+    bridge.completeEditorPreview();
+    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 16));
+
+    expect(
+      find.byKey(const ValueKey('crop-editor-preview-loading')),
+      findsNothing,
+    );
+    final preview = tester.widget<AbstractWallpaper>(
+      find.descendant(
+        of: find.byKey(const ValueKey('crop-editor-preview')),
+        matching: find.byType(AbstractWallpaper),
+      ),
+    );
+    expect(preview.previewBytes, same(bridge.editorBytes));
+    expect(
+      tester
+          .widget<TextButton>(find.byKey(const ValueKey('crop-editor-save')))
+          .onPressed,
+      isNotNull,
+    );
+  });
+
   testWidgets('a failed crop save stays open and explains the problem', (
     tester,
   ) async {
@@ -965,6 +1123,113 @@ class _PopulatedBridge extends _EmptyBridge {
   Future<Map<String, Object?>> moveWallpaper(int oldIndex, int newIndex) async {
     wallpapers.insert(newIndex, wallpapers.removeAt(oldIndex));
     return configuration();
+  }
+}
+
+class _ImagePreviewBridge extends _EmptyBridge {
+  _ImagePreviewBridge() {
+    wallpapers = [
+      {
+        'uri': 'local:first.jpg',
+        'name': 'First',
+        'thumbnail': firstThumbnail,
+        'mainPreview': firstMainPreview,
+        'imageWidth': 1080,
+        'imageHeight': 2400,
+        'crop': const {'scale': 1.0, 'offsetX': 0.0, 'offsetY': 0.0},
+      },
+      {
+        'uri': 'local:second.jpg',
+        'name': 'Second',
+        'thumbnail': secondThumbnail,
+        'imageWidth': 1080,
+        'imageHeight': 2400,
+        'crop': const {'scale': 1.0, 'offsetX': 0.0, 'offsetY': 0.0},
+      },
+    ];
+  }
+
+  static final pixel = base64Decode(
+    'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII=',
+  );
+
+  final Uint8List firstThumbnail = Uint8List.fromList(pixel);
+  final Uint8List firstMainPreview = Uint8List.fromList(pixel);
+  final Uint8List secondThumbnail = Uint8List.fromList(pixel);
+  final Uint8List secondMainPreview = Uint8List.fromList(pixel);
+  final Completer<Uint8List?> mainPreviewResult = Completer();
+  int mainPreviewRequests = 0;
+  late final List<Map<String, Object?>> wallpapers;
+
+  @override
+  Future<Map<String, Object?>> state() async => {
+    'index': 0,
+    'wallpaperCount': wallpapers.length,
+    'paused': false,
+    'shuffle': false,
+    'fit': 'cropToFill',
+  };
+
+  @override
+  Future<Map<String, Object?>> configuration() async => {
+    ...await state(),
+    'wallpapers': wallpapers,
+  };
+
+  @override
+  Future<int?> setCurrent(int index) async => index;
+
+  @override
+  Future<Uint8List?> mainPreview(String value) {
+    mainPreviewRequests++;
+    return mainPreviewResult.future;
+  }
+
+  void completeMainPreview() {
+    if (!mainPreviewResult.isCompleted) {
+      mainPreviewResult.complete(secondMainPreview);
+    }
+  }
+}
+
+class _DelayedSelectionBridge extends _PopulatedBridge {
+  final List<(int, Completer<int?>)> pendingSelections = [];
+
+  @override
+  Future<int?> setCurrent(int index) {
+    final result = Completer<int?>();
+    pendingSelections.add((index, result));
+    return result.future;
+  }
+
+  void completeFirstSelection() {
+    final (index, result) = pendingSelections.first;
+    if (!result.isCompleted) result.complete(index);
+  }
+
+  void completeSelections() {
+    for (final (index, result) in pendingSelections) {
+      if (!result.isCompleted) result.complete(index);
+    }
+    pendingSelections.clear();
+  }
+}
+
+class _LazyEditorPreviewBridge extends _ImagePreviewBridge {
+  final Uint8List editorBytes = Uint8List.fromList(_ImagePreviewBridge.pixel);
+  final Completer<Uint8List?> editorPreviewResult = Completer();
+  int editorPreviewRequests = 0;
+
+  @override
+  Future<Uint8List?> editorPreview(String value) {
+    editorPreviewRequests++;
+    return editorPreviewResult.future;
+  }
+
+  void completeEditorPreview() {
+    if (!editorPreviewResult.isCompleted) {
+      editorPreviewResult.complete(editorBytes);
+    }
   }
 }
 

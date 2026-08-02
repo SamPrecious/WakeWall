@@ -4,6 +4,7 @@ import android.app.WallpaperManager
 import android.content.ComponentName
 import android.content.Intent
 import android.net.Uri
+import android.os.Process
 import androidx.activity.result.PickVisualMediaRequest
 import androidx.activity.result.contract.ActivityResultContracts
 import io.flutter.embedding.android.FlutterFragmentActivity
@@ -11,6 +12,7 @@ import io.flutter.embedding.engine.FlutterEngine
 import io.flutter.plugin.common.MethodChannel
 import java.util.concurrent.Executors
 import java.util.concurrent.TimeUnit
+import java.util.concurrent.atomic.AtomicBoolean
 
 class MainActivity : FlutterFragmentActivity() {
     private val channelName = "com.sprecious.wakewall/control"
@@ -88,7 +90,7 @@ class MainActivity : FlutterFragmentActivity() {
                         val store = WakeWallStore(this)
                         val next = store.advance("manual")
                         sendBroadcast(
-                            Intent(WakeWallService.ACTION_CONFIGURATION_UPDATED).setPackage(packageName)
+                            Intent(WakeWallService.ACTION_CURRENT_CHANGED).setPackage(packageName)
                         )
                         result.success(next)
                     }
@@ -97,7 +99,7 @@ class MainActivity : FlutterFragmentActivity() {
                         val index = call.argument<Int>("index") ?: 0
                         WakeWallStore(this).commitIndex(index, "manual_select")
                         sendBroadcast(
-                            Intent(WakeWallService.ACTION_CONFIGURATION_UPDATED).setPackage(packageName)
+                            Intent(WakeWallService.ACTION_CURRENT_CHANGED).setPackage(packageName)
                         )
                         result.success(index)
                     }
@@ -273,8 +275,22 @@ class MainActivity : FlutterFragmentActivity() {
                         }
                     }
 
+                    "mainPreview" -> runInBackground(result) {
+                        WakeWallStore(this).mainPreview(
+                            call.argument<String>("value") ?: "",
+                        )
+                    }
+
+                    "editorPreview" -> runInBackground(result) {
+                        WakeWallStore(this).editorPreview(
+                            call.argument<String>("value") ?: "",
+                        )
+                    }
+
                     "configuration" -> runInBackground(result) {
-                        configurationWithStatus(WakeWallStore(this))
+                        val configuration = configurationWithStatus(WakeWallStore(this))
+                        scheduleMainPreviewWarmup()
+                        configuration
                     }
                     "state" -> result.success(stateWithStatus(WakeWallStore(this)))
                     else -> result.notImplemented()
@@ -432,6 +448,22 @@ class MainActivity : FlutterFragmentActivity() {
         )
     }
 
+    private fun scheduleMainPreviewWarmup() {
+        if (!previewWarmupScheduled.compareAndSet(false, true)) return
+        val context = applicationContext
+        previewExecutor.schedule(
+            {
+                try {
+                    WakeWallStore(context).prepareMainPreviews()
+                } finally {
+                    previewWarmupScheduled.set(false)
+                }
+            },
+            750,
+            TimeUnit.MILLISECONDS,
+        )
+    }
+
     private fun configurationWithStatus(store: WakeWallStore): Map<String, Any> =
         store.configuration() + mapOf("wakeWallActive" to isWakeWallActive())
 
@@ -474,5 +506,12 @@ class MainActivity : FlutterFragmentActivity() {
     companion object {
         private val backgroundExecutor = Executors.newSingleThreadExecutor()
         private val cleanupExecutor = Executors.newSingleThreadScheduledExecutor()
+        private val previewWarmupScheduled = AtomicBoolean(false)
+        private val previewExecutor = Executors.newSingleThreadScheduledExecutor { task ->
+            Thread({
+                Process.setThreadPriority(Process.THREAD_PRIORITY_BACKGROUND)
+                task.run()
+            }, "WakeWallPreviewWarmup")
+        }
     }
 }

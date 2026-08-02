@@ -2,6 +2,7 @@ import 'dart:async';
 import 'dart:math' as math;
 
 import 'package:auto_route/auto_route.dart';
+import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 
@@ -61,12 +62,14 @@ class HomeScreen extends StatefulWidget {
 // Holds temporary UI state that should not live in the native wallpaper store.
 class _HomeScreenState extends State<HomeScreen> {
   static const importOverlayDelay = Duration(milliseconds: 350);
+  static const previewWarmupDelay = Duration(milliseconds: 90);
 
   bool draggingWallpaper = false;
   bool importingImages = false;
   ImportProgress? importProgress;
-  final Set<String> warmedPreviews = {};
-  bool previewWarmupScheduled = false;
+  final ValueNotifier<int?> optimisticPreviewIndex = ValueNotifier(null);
+  Timer? previewWarmupTimer;
+  int previewWarmupSerial = 0;
 
   WakeWallController get controller => widget.controller;
 
@@ -82,43 +85,39 @@ class _HomeScreenState extends State<HomeScreen> {
   void dispose() {
     controller.removeListener(_schedulePreviewWarmup);
     controller.selectedIndexListenable.removeListener(_schedulePreviewWarmup);
+    previewWarmupTimer?.cancel();
+    optimisticPreviewIndex.dispose();
     super.dispose();
   }
 
-  // Decodes large previews before the user taps them so even detailed photos open immediately.
+  // Warms only nearby previews after interaction settles so stale decodes cannot pile up.
   void _schedulePreviewWarmup() {
-    if (previewWarmupScheduled) return;
-    previewWarmupScheduled = true;
-    WidgetsBinding.instance.addPostFrameCallback((_) async {
-      previewWarmupScheduled = false;
-      if (!mounted) return;
-      final wallpapers = controller.wallpapers;
-      if (wallpapers.isEmpty) return;
-      final start = controller.selectedIndex
-          .clamp(0, wallpapers.length - 1)
-          .toInt();
-      final warmupIndexes = <int>{
-        start,
-        if (wallpapers.length > 1) (start + 1) % wallpapers.length,
-        if (wallpapers.length > 2) (start + 2) % wallpapers.length,
-        if (wallpapers.length > 1) (start - 1) % wallpapers.length,
-      };
-      final warmupWallpapers = [
-        for (final index in warmupIndexes) wallpapers[index],
-      ];
-      for (final wallpaper in warmupWallpapers) {
-        final bytes = wallpaper.mainPreview;
-        if (bytes == null) continue;
-        final cacheKey = '${wallpaper.id}:${identityHashCode(bytes)}';
-        if (warmedPreviews.contains(cacheKey)) continue;
-        warmedPreviews.add(cacheKey);
-        try {
-          await precacheImage(MemoryImage(bytes), context);
-        } catch (_) {
-          // A damaged cache can still be replaced by the normal image error path.
+    previewWarmupTimer?.cancel();
+    final serial = ++previewWarmupSerial;
+    previewWarmupTimer = Timer(previewWarmupDelay, () {
+      WidgetsBinding.instance.addPostFrameCallback((_) async {
+        if (!mounted || serial != previewWarmupSerial) return;
+        final wallpapers = controller.wallpapers;
+        if (wallpapers.length < 2) return;
+        final selectedIndex = controller.selectedIndex
+            .clamp(0, wallpapers.length - 1)
+            .toInt();
+        final neighborIndexes = <int>{
+          (selectedIndex + 1) % wallpapers.length,
+          (selectedIndex + 2) % wallpapers.length,
+          (selectedIndex - 1) % wallpapers.length,
+        };
+        for (final index in neighborIndexes) {
+          if (!mounted || serial != previewWarmupSerial) return;
+          final bytes = wallpapers[index].mainPreview;
+          if (bytes == null) continue;
+          try {
+            await precacheImage(MemoryImage(bytes), context);
+          } catch (_) {
+            // A damaged cache can still use the normal image error path.
+          }
         }
-        if (!mounted) return;
-      }
+      });
     });
   }
 
@@ -260,6 +259,8 @@ class _HomeScreenState extends State<HomeScreen> {
                               child: RepaintBoundary(
                                 child: _Preview(
                                   controller: controller,
+                                  optimisticPreviewIndex:
+                                      optimisticPreviewIndex,
                                   maximumHeight: previewHeight,
                                   maximumWidth: tablet
                                       ? tabletPreviewMaxWidth
@@ -300,6 +301,9 @@ class _HomeScreenState extends State<HomeScreen> {
                                         headerHeight: stripHeaderHeight,
                                         labelFontSize: tablet ? 18 : 15.5,
                                         onAdd: _addImages,
+                                        onPreviewIndexChanged: (index) =>
+                                            optimisticPreviewIndex.value =
+                                                index,
                                         onDragChanged: (dragging) {
                                           if (draggingWallpaper == dragging) {
                                             return;
@@ -755,6 +759,7 @@ class _HeaderActionButton extends StatelessWidget {
 class _Preview extends StatelessWidget {
   const _Preview({
     required this.controller,
+    required this.optimisticPreviewIndex,
     required this.maximumHeight,
     this.maximumWidth,
     required this.draggingWallpaper,
@@ -766,6 +771,7 @@ class _Preview extends StatelessWidget {
   });
 
   final WakeWallController controller;
+  final ValueListenable<int?> optimisticPreviewIndex;
   final double maximumHeight;
   final double? maximumWidth;
   final bool draggingWallpaper;
@@ -814,89 +820,103 @@ class _Preview extends StatelessWidget {
                     key: ValueKey('initial-wallpaper-loading'),
                   )
                 : controller.hasWallpapers
-                ? ValueListenableBuilder<int>(
+                ? ValueListenableBuilder<int?>(
                     key: const ValueKey('populated'),
-                    valueListenable: controller.selectedIndexListenable,
-                    builder: (context, selectedIndex, _) {
-                      final wallpapers = controller.wallpapers;
-                      if (wallpapers.isEmpty) {
-                        return _EmptyPreview(onAdd: onAdd);
-                      }
-                      final boundedIndex = selectedIndex
-                          .clamp(0, wallpapers.length - 1)
-                          .toInt();
-                      final wallpaper = wallpapers[boundedIndex];
-                      final previewBytes =
-                          wallpaper.mainPreview ?? wallpaper.preview;
-                      return Stack(
-                        fit: StackFit.expand,
-                        children: [
-                          AbstractWallpaper(
-                            wallpaper: wallpaper,
-                            previewBytes: previewBytes,
-                            applyCrop: wallpaper.mainPreview == null,
-                            borderRadius: radius,
-                          ),
-                          Positioned(
-                            left: 0,
-                            right: 0,
-                            top: 14,
-                            child: Center(
-                              child: AnimatedSwitcher(
-                                duration: const Duration(milliseconds: 240),
-                                reverseDuration: const Duration(
-                                  milliseconds: 260,
-                                ),
-                                switchInCurve: Curves.easeOut,
-                                switchOutCurve: Curves.easeIn,
-                                child: controller.paused
-                                    ? _PausedPreviewButton(
-                                        key: const ValueKey(
-                                          'paused-chip-visible',
-                                        ),
-                                        onTap: onResume,
-                                      )
-                                    : const SizedBox(
-                                        key: ValueKey('paused-chip-hidden'),
+                    valueListenable: optimisticPreviewIndex,
+                    builder: (context, optimisticIndex, _) =>
+                        ValueListenableBuilder<int>(
+                          valueListenable: controller.selectedIndexListenable,
+                          builder: (context, selectedIndex, _) {
+                            final wallpapers = controller.wallpapers;
+                            if (wallpapers.isEmpty) {
+                              return _EmptyPreview(onAdd: onAdd);
+                            }
+                            final displayIndex =
+                                optimisticIndex ?? selectedIndex;
+                            final boundedIndex = displayIndex
+                                .clamp(0, wallpapers.length - 1)
+                                .toInt();
+                            final wallpaper = wallpapers[boundedIndex];
+                            final previewBytes =
+                                wallpaper.mainPreview ?? wallpaper.preview;
+                            return Stack(
+                              fit: StackFit.expand,
+                              children: [
+                                if (previewBytes == null &&
+                                    wallpaper.isUserImage)
+                                  const _MainPreviewLoading()
+                                else
+                                  AbstractWallpaper(
+                                    wallpaper: wallpaper,
+                                    previewBytes: previewBytes,
+                                    applyCrop: wallpaper.mainPreview == null,
+                                    borderRadius: radius,
+                                  ),
+                                Positioned(
+                                  left: 0,
+                                  right: 0,
+                                  top: 14,
+                                  child: Center(
+                                    child: AnimatedSwitcher(
+                                      duration: const Duration(
+                                        milliseconds: 240,
                                       ),
-                              ),
-                            ),
-                          ),
-                          Positioned(
-                            left: 0,
-                            right: 0,
-                            bottom: 14,
-                            child: Center(
-                              child: Row(
-                                mainAxisSize: MainAxisSize.min,
-                                children: [
-                                  _OverlayButton(
-                                    icon: Icons.photo_album_outlined,
-                                    tooltip: 'Add to Albums',
-                                    onTap: onAlbums,
+                                      reverseDuration: const Duration(
+                                        milliseconds: 260,
+                                      ),
+                                      switchInCurve: Curves.easeOut,
+                                      switchOutCurve: Curves.easeIn,
+                                      child: controller.paused
+                                          ? _PausedPreviewButton(
+                                              key: const ValueKey(
+                                                'paused-chip-visible',
+                                              ),
+                                              onTap: onResume,
+                                            )
+                                          : const SizedBox(
+                                              key: ValueKey(
+                                                'paused-chip-hidden',
+                                              ),
+                                            ),
+                                    ),
                                   ),
-                                  const SizedBox(width: 8),
-                                  _OverlayButton(
-                                    icon: Icons.crop_rounded,
-                                    tooltip: 'Adjust Crop',
-                                    onTap: onCrop,
+                                ),
+                                Positioned(
+                                  left: 0,
+                                  right: 0,
+                                  bottom: 14,
+                                  child: Center(
+                                    child: Row(
+                                      mainAxisSize: MainAxisSize.min,
+                                      children: [
+                                        _OverlayButton(
+                                          icon: Icons.photo_album_outlined,
+                                          tooltip: 'Add to Albums',
+                                          onTap: onAlbums,
+                                        ),
+                                        const SizedBox(width: 8),
+                                        _OverlayButton(
+                                          icon: Icons.crop_rounded,
+                                          tooltip: 'Adjust Crop',
+                                          onTap: onCrop,
+                                        ),
+                                        const SizedBox(width: 8),
+                                        _OverlayButton(
+                                          icon: Icons.skip_next_rounded,
+                                          tooltip: 'Next Wallpaper',
+                                          onTap: () {
+                                            _wakeWallTapHaptic();
+                                            unawaited(controller.next());
+                                          },
+                                        ),
+                                      ],
+                                    ),
                                   ),
-                                  const SizedBox(width: 8),
-                                  _OverlayButton(
-                                    icon: Icons.skip_next_rounded,
-                                    tooltip: 'Next Wallpaper',
-                                    onTap: () {
-                                      _wakeWallTapHaptic();
-                                      unawaited(controller.next());
-                                    },
-                                  ),
-                                ],
-                              ),
-                            ),
-                          ),
-                        ],
-                      );
-                    },
+                                ),
+                              ],
+                            );
+                          },
+                        ),
                   )
                 : controller.hasStoredWallpapers
                 ? _UnavailablePreview(
@@ -1056,6 +1076,45 @@ class _InitialLoadingPreviewState extends State<_InitialLoadingPreview> {
               ).textTheme.titleMedium?.copyWith(color: colors.muted),
             ),
           ],
+        ),
+      ),
+    );
+  }
+}
+
+// Keeps tiny strip thumbnails out of the large card while its real preview is built.
+class _MainPreviewLoading extends StatelessWidget {
+  const _MainPreviewLoading();
+
+  @override
+  Widget build(BuildContext context) {
+    final colors = context.wakeWallColors;
+    return Semantics(
+      label: 'Preparing wallpaper preview',
+      child: ColoredBox(
+        key: const ValueKey('main-preview-loading'),
+        color: colors.surface,
+        child: Center(
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              SizedBox(
+                width: 26,
+                height: 26,
+                child: CircularProgressIndicator(
+                  strokeWidth: 2.2,
+                  color: colors.tealStrong,
+                ),
+              ),
+              const SizedBox(height: 12),
+              Text(
+                'Preparing Wallpaper',
+                style: Theme.of(
+                  context,
+                ).textTheme.bodyMedium?.copyWith(color: colors.muted),
+              ),
+            ],
+          ),
         ),
       ),
     );
@@ -1238,6 +1297,7 @@ class _WallpaperStrip extends StatefulWidget {
     required this.headerHeight,
     required this.labelFontSize,
     required this.onAdd,
+    required this.onPreviewIndexChanged,
     required this.onDragChanged,
   });
 
@@ -1246,6 +1306,7 @@ class _WallpaperStrip extends StatefulWidget {
   final double headerHeight;
   final double labelFontSize;
   final VoidCallback onAdd;
+  final ValueChanged<int?> onPreviewIndexChanged;
   final ValueChanged<bool> onDragChanged;
 
   @override
@@ -1255,7 +1316,6 @@ class _WallpaperStrip extends StatefulWidget {
 class _WallpaperStripState extends State<_WallpaperStrip> {
   final ScrollController scrollController = ScrollController();
   int? optimisticSelectedIndex;
-  int selectionSerial = 0;
   int previousWallpaperCount = 0;
 
   WakeWallController get controller => widget.controller;
@@ -1302,43 +1362,31 @@ class _WallpaperStripState extends State<_WallpaperStrip> {
     scrollController.jumpTo(target);
   }
 
-  // Starts decoding the large preview while the user's finger is still down.
-  void warmPreview(int index) {
-    final wallpapers = controller.wallpapers;
-    final preview = wallpapers[index].preview;
-    final mainPreview = wallpapers[index].mainPreview;
-    if (mainPreview != null) {
-      unawaited(
-        precacheImage(MemoryImage(mainPreview), context, onError: (_, _) {}),
-      );
-    } else if (preview != null) {
-      unawaited(
-        precacheImage(MemoryImage(preview), context, onError: (_, _) {}),
-      );
-    }
-  }
-
   void previewSelection(int index) {
-    // The blue border moves before Android confirms selection.
+    // Both the border and large cached thumbnail move before Android is called.
     if (index < 0 || index >= controller.wallpapers.length) return;
-    setState(() => optimisticSelectedIndex = index);
+    unawaited(controller.ensureMainPreview(index));
+    if (optimisticSelectedIndex != index) {
+      setState(() => optimisticSelectedIndex = index);
+    }
+    widget.onPreviewIndexChanged(index);
   }
 
   void cancelPreviewSelection() {
-    setState(() => optimisticSelectedIndex = null);
+    widget.onPreviewIndexChanged(null);
+    if (optimisticSelectedIndex != null) {
+      setState(() => optimisticSelectedIndex = null);
+    }
   }
 
   void commitSelection(int index) {
-    final serial = ++selectionSerial;
-    // Show selection feedback immediately while Android catches up.
-    previewSelection(index);
-    unawaited(
-      controller.select(index).whenComplete(() {
-        if (mounted && serial == selectionSerial) {
-          setState(() => optimisticSelectedIndex = null);
-        }
-      }),
-    );
+    if (index < 0 || index >= controller.wallpapers.length) return;
+    final selection = controller.select(index);
+    widget.onPreviewIndexChanged(null);
+    if (optimisticSelectedIndex != null) {
+      setState(() => optimisticSelectedIndex = null);
+    }
+    unawaited(selection);
   }
 
   void scrollToEndAfterLayout() {
@@ -1485,7 +1533,6 @@ class _WallpaperStripState extends State<_WallpaperStrip> {
                                     child: Listener(
                                       onPointerDown: (_) {
                                         previewSelection(index);
-                                        warmPreview(index);
                                       },
                                       onPointerCancel: (_) =>
                                           cancelPreviewSelection(),
@@ -1531,9 +1578,8 @@ class _WallpaperTile extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final colors = context.wakeWallColors;
-    return AnimatedContainer(
+    return Container(
       key: ValueKey('wallpaper-thumbnail-${wallpaper.id}'),
-      duration: selected ? Duration.zero : const Duration(milliseconds: 70),
       width: width,
       height: height,
       padding: const EdgeInsets.all(2.5),

@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:math' as math;
 
 import 'package:auto_route/auto_route.dart';
@@ -48,6 +49,7 @@ class _CropEditorScreenState extends State<CropEditorScreen> {
   double gestureStartY = 0;
   bool cropGridVisible = false;
   bool saving = false;
+  bool loadingPreview = false;
 
   Wallpaper get wallpaper =>
       widget.controller.wallpapers[widget.wallpaperIndex];
@@ -58,12 +60,16 @@ class _CropEditorScreenState extends State<CropEditorScreen> {
       fitBackgroundColor != const Color(0xFF202124) ||
       rotationQuarterTurns != 0;
 
+  bool get previewReady => !wallpaper.isUserImage || wallpaper.preview != null;
+
   @override
   void initState() {
     super.initState();
     crop = wallpaper.crop;
     displayMode = wallpaper.displayMode;
     fitBackgroundColor = wallpaper.fitBackgroundColor;
+    loadingPreview = wallpaper.isUserImage && wallpaper.preview == null;
+    if (loadingPreview) unawaited(_loadPreview());
   }
 
   @override
@@ -74,6 +80,7 @@ class _CropEditorScreenState extends State<CropEditorScreen> {
           children: [
             _EditorHeader(
               saving: saving,
+              canSave: previewReady,
               onCancel: () {
                 _cropTapHaptic();
                 context.router.pop();
@@ -122,60 +129,69 @@ class _CropEditorScreenState extends State<CropEditorScreen> {
                       image: true,
                       child: GestureDetector(
                         behavior: HitTestBehavior.opaque,
-                        onScaleStart: (details) {
-                          if (!cropGridVisible) {
-                            setState(() => cropGridVisible = true);
-                          }
-                          gestureStartScale = crop.scale;
-                          gestureStartFocalPoint = details.focalPoint;
-                          gestureStartX = crop.offsetX;
-                          gestureStartY = crop.offsetY;
-                        },
-                        onScaleUpdate: (details) {
-                          final nextScale = (gestureStartScale * details.scale)
-                              .clamp(1.0, 4.0);
-                          final delta =
-                              details.focalPoint - gestureStartFocalPoint;
-                          final baseScale =
-                              displayMode == WallpaperDisplayMode.fill
-                              ? math.max(
-                                  width / sourceWidth,
-                                  height / sourceHeight,
-                                )
-                              : math.min(
-                                  width / sourceWidth,
-                                  height / sourceHeight,
-                                );
-                          final maxOffsetX =
-                              math.max(
-                                0,
-                                sourceWidth * baseScale * nextScale - width,
-                              ) /
-                              (2 * width);
-                          final maxOffsetY =
-                              math.max(
-                                0,
-                                sourceHeight * baseScale * nextScale - height,
-                              ) /
-                              (2 * height);
-                          // Keeps the wallpaper inside the preview while it is moved.
-                          setState(() {
-                            crop = WallpaperCrop(
-                              scale: nextScale,
-                              offsetX: (gestureStartX + delta.dx / width).clamp(
-                                -maxOffsetX,
-                                maxOffsetX,
-                              ),
-                              offsetY: (gestureStartY + delta.dy / height)
-                                  .clamp(-maxOffsetY, maxOffsetY),
-                            );
-                          });
-                        },
-                        onScaleEnd: (_) {
-                          if (cropGridVisible) {
-                            setState(() => cropGridVisible = false);
-                          }
-                        },
+                        onScaleStart: previewReady
+                            ? (details) {
+                                if (!cropGridVisible) {
+                                  setState(() => cropGridVisible = true);
+                                }
+                                gestureStartScale = crop.scale;
+                                gestureStartFocalPoint = details.focalPoint;
+                                gestureStartX = crop.offsetX;
+                                gestureStartY = crop.offsetY;
+                              }
+                            : null,
+                        onScaleUpdate: previewReady
+                            ? (details) {
+                                final nextScale =
+                                    (gestureStartScale * details.scale).clamp(
+                                      1.0,
+                                      4.0,
+                                    );
+                                final delta =
+                                    details.focalPoint - gestureStartFocalPoint;
+                                final baseScale =
+                                    displayMode == WallpaperDisplayMode.fill
+                                    ? math.max(
+                                        width / sourceWidth,
+                                        height / sourceHeight,
+                                      )
+                                    : math.min(
+                                        width / sourceWidth,
+                                        height / sourceHeight,
+                                      );
+                                final maxOffsetX =
+                                    math.max(
+                                      0,
+                                      sourceWidth * baseScale * nextScale -
+                                          width,
+                                    ) /
+                                    (2 * width);
+                                final maxOffsetY =
+                                    math.max(
+                                      0,
+                                      sourceHeight * baseScale * nextScale -
+                                          height,
+                                    ) /
+                                    (2 * height);
+                                // Keeps the wallpaper inside the preview while it is moved.
+                                setState(() {
+                                  crop = WallpaperCrop(
+                                    scale: nextScale,
+                                    offsetX: (gestureStartX + delta.dx / width)
+                                        .clamp(-maxOffsetX, maxOffsetX),
+                                    offsetY: (gestureStartY + delta.dy / height)
+                                        .clamp(-maxOffsetY, maxOffsetY),
+                                  );
+                                });
+                              }
+                            : null,
+                        onScaleEnd: previewReady
+                            ? (_) {
+                                if (cropGridVisible) {
+                                  setState(() => cropGridVisible = false);
+                                }
+                              }
+                            : null,
                         child: ExcludeSemantics(
                           child: Stack(
                             children: [
@@ -183,15 +199,20 @@ class _CropEditorScreenState extends State<CropEditorScreen> {
                                 key: const ValueKey('crop-editor-preview'),
                                 width: width,
                                 height: height,
-                                child: AbstractWallpaper(
-                                  wallpaper: wallpaper,
-                                  crop: crop,
-                                  displayMode: displayMode,
-                                  fitBackgroundColor: fitBackgroundColor,
-                                  previewBytes: wallpaper.preview,
-                                  rotationQuarterTurns: rotationQuarterTurns,
-                                  borderRadius: BorderRadius.circular(18),
-                                ),
+                                child: previewReady
+                                    ? AbstractWallpaper(
+                                        wallpaper: wallpaper,
+                                        crop: crop,
+                                        displayMode: displayMode,
+                                        fitBackgroundColor: fitBackgroundColor,
+                                        previewBytes: wallpaper.preview,
+                                        rotationQuarterTurns:
+                                            rotationQuarterTurns,
+                                        borderRadius: BorderRadius.circular(18),
+                                      )
+                                    : _EditorPreviewStatus(
+                                        loading: loadingPreview,
+                                      ),
                               ),
                               Positioned.fill(
                                 child: IgnorePointer(
@@ -223,10 +244,17 @@ class _CropEditorScreenState extends State<CropEditorScreen> {
                               Positioned(
                                 right: 14,
                                 bottom: 14,
-                                child: _CropOverlayButton(
-                                  icon: Icons.crop_rotate_rounded,
-                                  tooltip: 'Rotate wallpaper',
-                                  onTap: _rotate,
+                                child: IgnorePointer(
+                                  ignoring: !previewReady,
+                                  child: AnimatedOpacity(
+                                    duration: const Duration(milliseconds: 140),
+                                    opacity: previewReady ? 1 : .35,
+                                    child: _CropOverlayButton(
+                                      icon: Icons.crop_rotate_rounded,
+                                      tooltip: 'Rotate wallpaper',
+                                      onTap: _rotate,
+                                    ),
+                                  ),
                                 ),
                               ),
                               Positioned(
@@ -239,7 +267,7 @@ class _CropEditorScreenState extends State<CropEditorScreen> {
                                   ),
                                   switchInCurve: Curves.easeOut,
                                   switchOutCurve: Curves.easeIn,
-                                  child: canReset
+                                  child: canReset && previewReady
                                       ? _CropOverlayButton(
                                           key: const ValueKey(
                                             'crop-reset-visible',
@@ -264,18 +292,25 @@ class _CropEditorScreenState extends State<CropEditorScreen> {
                 },
               ),
             ),
-            _EditorFooter(
-              crop: crop,
-              displayMode: displayMode,
-              fitBackgroundColor: fitBackgroundColor,
-              onDisplayModeChanged: (value) {
-                if (value != displayMode) _cropTapHaptic();
-                setState(() => displayMode = value);
-              },
-              onFitBackgroundColorChanged: (value) {
-                if (value != fitBackgroundColor) _cropTapHaptic();
-                setState(() => fitBackgroundColor = value);
-              },
+            IgnorePointer(
+              ignoring: !previewReady,
+              child: AnimatedOpacity(
+                duration: const Duration(milliseconds: 140),
+                opacity: previewReady ? 1 : .45,
+                child: _EditorFooter(
+                  crop: crop,
+                  displayMode: displayMode,
+                  fitBackgroundColor: fitBackgroundColor,
+                  onDisplayModeChanged: (value) {
+                    if (value != displayMode) _cropTapHaptic();
+                    setState(() => displayMode = value);
+                  },
+                  onFitBackgroundColorChanged: (value) {
+                    if (value != fitBackgroundColor) _cropTapHaptic();
+                    setState(() => fitBackgroundColor = value);
+                  },
+                ),
+              ),
             ),
           ],
         ),
@@ -283,8 +318,14 @@ class _CropEditorScreenState extends State<CropEditorScreen> {
     );
   }
 
+  Future<void> _loadPreview() async {
+    await widget.controller.ensureEditorPreview(widget.wallpaperIndex);
+    if (!mounted) return;
+    setState(() => loadingPreview = false);
+  }
+
   Future<void> _save() async {
-    if (saving) return;
+    if (saving || !previewReady) return;
     _cropCommitHaptic();
     setState(() => saving = true);
     // Android rewrites the stored source only after Save, not while previewing.
@@ -322,6 +363,7 @@ class _CropEditorScreenState extends State<CropEditorScreen> {
   }
 
   void _rotate() {
+    if (!previewReady) return;
     _cropTapHaptic();
     setState(() {
       // Reset crop after rotation so old offsets cannot point outside the new shape.
@@ -331,14 +373,65 @@ class _CropEditorScreenState extends State<CropEditorScreen> {
   }
 }
 
+class _EditorPreviewStatus extends StatelessWidget {
+  const _EditorPreviewStatus({required this.loading});
+
+  final bool loading;
+
+  @override
+  Widget build(BuildContext context) {
+    final colors = context.wakeWallColors;
+    return ColoredBox(
+      key: const ValueKey('crop-editor-preview-loading'),
+      color: colors.surface,
+      child: Center(
+        child: Semantics(
+          label: loading
+              ? 'Preparing crop editor preview'
+              : 'Crop editor preview unavailable',
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              if (loading)
+                SizedBox(
+                  width: 28,
+                  height: 28,
+                  child: CircularProgressIndicator(
+                    strokeWidth: 2.3,
+                    color: colors.tealStrong,
+                  ),
+                )
+              else
+                Icon(
+                  Icons.broken_image_outlined,
+                  size: 30,
+                  color: colors.muted,
+                ),
+              const SizedBox(height: 12),
+              Text(
+                loading ? 'Preparing Editor' : 'Preview Unavailable',
+                style: Theme.of(
+                  context,
+                ).textTheme.bodyMedium?.copyWith(color: colors.muted),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+}
+
 class _EditorHeader extends StatelessWidget {
   const _EditorHeader({
     required this.saving,
+    required this.canSave,
     required this.onCancel,
     required this.onSave,
   });
 
   final bool saving;
+  final bool canSave;
   final VoidCallback onCancel;
   final VoidCallback onSave;
 
@@ -392,7 +485,7 @@ class _EditorHeader extends StatelessWidget {
               child: TextButton(
                 key: const ValueKey('crop-editor-save'),
                 style: compactButtonStyle,
-                onPressed: saving ? null : onSave,
+                onPressed: saving || !canSave ? null : onSave,
                 child: AnimatedSwitcher(
                   duration: const Duration(milliseconds: 140),
                   child: saving

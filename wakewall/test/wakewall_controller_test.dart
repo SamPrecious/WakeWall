@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:typed_data';
 import 'dart:convert';
 
@@ -34,6 +35,50 @@ void main() {
 
     expect(controller.selectedIndex, 3);
   });
+
+  test('controller deduplicates lazy main and editor preview loads', () async {
+    final bridge = _LazyPreviewBridge();
+    final controller = WakeWallController(bridge: bridge);
+
+    await controller.initialize();
+    expect(controller.wallpapers[1].mainPreview, isNull);
+    expect(controller.wallpapers[1].preview, isNull);
+
+    final firstMainLoad = controller.ensureMainPreview(1);
+    final duplicateMainLoad = controller.ensureMainPreview(1);
+    expect(bridge.mainPreviewRequests, 1);
+    bridge.mainPreviewResult.complete(bridge.mainBytes);
+    await Future.wait([firstMainLoad, duplicateMainLoad]);
+    expect(controller.wallpapers[1].mainPreview, same(bridge.mainBytes));
+
+    final firstEditorLoad = controller.ensureEditorPreview(1);
+    final duplicateEditorLoad = controller.ensureEditorPreview(1);
+    expect(bridge.editorPreviewRequests, 1);
+    bridge.editorPreviewResult.complete(bridge.editorBytes);
+    await Future.wait([firstEditorLoad, duplicateEditorLoad]);
+    expect(controller.wallpapers[1].preview, same(bridge.editorBytes));
+  });
+
+  test(
+    'full native refresh preserves previews omitted from compact maps',
+    () async {
+      final bridge = _LazyPreviewBridge();
+      final controller = WakeWallController(bridge: bridge);
+
+      await controller.initialize();
+      final mainLoad = controller.ensureMainPreview(1);
+      final editorLoad = controller.ensureEditorPreview(1);
+      bridge.mainPreviewResult.complete(bridge.mainBytes);
+      bridge.editorPreviewResult.complete(bridge.editorBytes);
+      await Future.wait([mainLoad, editorLoad]);
+
+      await controller.initialize();
+
+      expect(controller.wallpapers[1].thumbnail, same(bridge.secondThumbnail));
+      expect(controller.wallpapers[1].mainPreview, same(bridge.mainBytes));
+      expect(controller.wallpapers[1].preview, same(bridge.editorBytes));
+    },
+  );
 
   test('lightweight resume refresh keeps the loaded image previews', () async {
     final bridge = _FakeNativeWallpaperBridge(currentIndex: 0);
@@ -378,6 +423,57 @@ class _IncrementalImportBridge extends _FakeNativeWallpaperBridge {
       },
     ],
   };
+}
+
+class _LazyPreviewBridge extends NativeWallpaperBridge {
+  final Uint8List firstMain = Uint8List.fromList([1, 2, 3]);
+  final Uint8List secondThumbnail = Uint8List.fromList([4, 5, 6]);
+  final Uint8List mainBytes = Uint8List.fromList([7, 8, 9]);
+  final Uint8List editorBytes = Uint8List.fromList([10, 11, 12]);
+  final Completer<Uint8List?> mainPreviewResult = Completer();
+  final Completer<Uint8List?> editorPreviewResult = Completer();
+  int mainPreviewRequests = 0;
+  int editorPreviewRequests = 0;
+
+  @override
+  Future<Map<String, Object?>> state() async => {
+    'index': 0,
+    'wallpaperCount': 2,
+    'paused': false,
+    'shuffle': false,
+    'fit': 'cropToFill',
+  };
+
+  @override
+  Future<Map<String, Object?>> configuration() async => {
+    ...await state(),
+    'wallpapers': [
+      {
+        'uri': 'local:first.jpg',
+        'name': 'First',
+        'mainPreview': firstMain,
+        'crop': const {'scale': 1.0, 'offsetX': 0.0, 'offsetY': 0.0},
+      },
+      {
+        'uri': 'local:second.jpg',
+        'name': 'Second',
+        'thumbnail': secondThumbnail,
+        'crop': const {'scale': 1.0, 'offsetX': 0.0, 'offsetY': 0.0},
+      },
+    ],
+  };
+
+  @override
+  Future<Uint8List?> mainPreview(String value) {
+    mainPreviewRequests++;
+    return mainPreviewResult.future;
+  }
+
+  @override
+  Future<Uint8List?> editorPreview(String value) {
+    editorPreviewRequests++;
+    return editorPreviewResult.future;
+  }
 }
 
 class _AlbumBridge extends _FakeNativeWallpaperBridge {

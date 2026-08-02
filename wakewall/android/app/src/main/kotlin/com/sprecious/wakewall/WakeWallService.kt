@@ -20,6 +20,7 @@ import android.os.Build
 import android.os.Handler
 import android.os.Looper
 import android.os.PowerManager
+import android.os.Process
 import android.service.wallpaper.WallpaperService
 import android.view.Display
 import android.view.SurfaceHolder
@@ -39,7 +40,12 @@ class WakeWallService : WallpaperService() {
         private val store by lazy { WakeWallStore(this@WakeWallService) }
         private val powerManager = getSystemService(PowerManager::class.java)
         private val displayManager = getSystemService(DisplayManager::class.java)
-        private val preparationExecutor = Executors.newSingleThreadExecutor()
+        private val preparationExecutor = Executors.newSingleThreadExecutor { task ->
+            Thread({
+                Process.setThreadPriority(Process.THREAD_PRIORITY_BACKGROUND)
+                task.run()
+            }, "WakeWallFramePreparation")
+        }
         private var visible = false
         private var destroyed = false
         private var screenOffHandled = false
@@ -50,6 +56,7 @@ class WakeWallService : WallpaperService() {
         private var preparedBitmap: Bitmap? = null
         private var preparationGeneration = 0
         private var preparingIndex = -1
+        private var currentPreparationPending = false
         private var rebuildScheduled = false
         private var wallpaperXOffset = .5f
         private var scrollingEnabled = false
@@ -88,6 +95,7 @@ class WakeWallService : WallpaperService() {
                         invalidateFrames()
                         scheduleRebuild()
                     }
+                    ACTION_CURRENT_CHANGED -> handleCurrentSelection()
                     ACTION_CROP_UPDATED -> {
                         invalidateFrames()
                         scheduleRebuild()
@@ -108,6 +116,7 @@ class WakeWallService : WallpaperService() {
                 addAction(Intent.ACTION_SCREEN_OFF)
                 addAction(Intent.ACTION_USER_UNLOCKED)
                 addAction(ACTION_CONFIGURATION_UPDATED)
+                addAction(ACTION_CURRENT_CHANGED)
                 addAction(ACTION_CROP_UPDATED)
             }
             ContextCompat.registerReceiver(
@@ -168,6 +177,50 @@ class WakeWallService : WallpaperService() {
             scrollingEnabled = enabled
             wallpaperXOffset = .5f
             setOffsetNotificationsEnabled(enabled)
+        }
+
+        // Manual selection reuses a ready frame and defers any missing decode off the UI thread.
+        private fun handleCurrentSelection() {
+            val activeStore = unlockedStore() ?: return
+            activeStore.refreshActiveWallpapers()
+            val selectedIndex = activeStore.index
+            val scrollingChanged = scrollingEnabled != activeStore.wallpaperScrolling
+            updateScrollingMode(activeStore)
+            handler.removeCallbacks(rebuildRunner)
+            rebuildScheduled = false
+
+            val retainedCurrent = currentFrameBitmap?.takeIf {
+                !scrollingChanged &&
+                    currentFrameIndex == selectedIndex &&
+                    frameMatchesSurface(it)
+            }
+            if (retainedCurrent != null) {
+                currentIndex = selectedIndex
+                if (visible) postFrame(selectedIndex, retainedCurrent, allowHidden = false)
+                scheduleNextFramePreparation()
+                return
+            }
+
+            val readyFrame = preparedBitmap?.takeIf {
+                !scrollingChanged && preparedIndex == selectedIndex && frameMatchesSurface(it)
+            }
+            preparationGeneration += 1
+            currentPreparationPending = false
+            currentIndex = selectedIndex
+            if (readyFrame != null) {
+                promotePreparedFrame(selectedIndex)
+                if (visible) postFrame(selectedIndex, readyFrame, allowHidden = false)
+                scheduleNextFramePreparation()
+                return
+            }
+
+            currentFrameBitmap?.takeUnless { it.isRecycled }?.recycle()
+            currentFrameBitmap = null
+            currentFrameIndex = -1
+            preparedBitmap?.takeUnless { it.isRecycled }?.recycle()
+            preparedBitmap = null
+            preparedIndex = -1
+            scheduleCurrentFramePreparation()
         }
 
         // Detects a real display-off transition without rotating when another app covers the wallpaper.
@@ -269,6 +322,10 @@ class WakeWallService : WallpaperService() {
                 return
             }
             currentIndex = activeStore.index
+            if (!visible && !screenOffHandled && !deviceIsTurningOff()) {
+                scheduleCurrentFramePreparation()
+                return
+            }
             val currentFrame = ensureCurrentFrame(activeStore)
             val drawSucceeded = postFrame(
                 index = currentIndex,
@@ -277,6 +334,68 @@ class WakeWallService : WallpaperService() {
             )
             if (!drawSucceeded) postBootFrame(allowHidden = true)
             scheduleNextFramePreparation()
+        }
+
+        // Builds a manually selected hidden frame at background priority, keeping Flutter responsive.
+        private fun scheduleCurrentFramePreparation() {
+            if (destroyed) return
+            val activeStore = unlockedStore() ?: return
+            val frame = surfaceHolder.surfaceFrame
+            if (frame.width() <= 0 || frame.height() <= 0) return
+
+            val existing = currentFrameBitmap
+            if (currentFrameIndex == currentIndex &&
+                existing != null &&
+                frameMatchesSurface(existing)
+            ) {
+                currentPreparationPending = false
+                if (visible) postFrame(currentIndex, existing, allowHidden = false)
+                scheduleNextFramePreparation()
+                return
+            }
+            if (preparingIndex >= 0) {
+                currentPreparationPending = true
+                return
+            }
+
+            currentPreparationPending = false
+            val targetIndex = currentIndex
+            val width = frameBufferWidth(frame.width())
+            val height = frame.height()
+            val scrolling = scrollingEnabled
+            val generation = ++preparationGeneration
+            preparingIndex = targetIndex
+            preparationExecutor.execute {
+                val bitmap = renderFrameBitmap(
+                    index = targetIndex,
+                    activeStore = activeStore,
+                    width = width,
+                    height = height,
+                    scrolling = scrolling,
+                )
+                handler.post {
+                    preparingIndex = -1
+                    val superseded = generation != preparationGeneration ||
+                        currentIndex != targetIndex
+                    val stillNeeded = !destroyed &&
+                        !superseded &&
+                        bitmap != null
+                    if (stillNeeded) {
+                        currentFrameBitmap?.takeUnless { it.isRecycled }?.recycle()
+                        currentFrameBitmap = bitmap
+                        currentFrameIndex = targetIndex
+                        if (visible) postFrame(targetIndex, bitmap, allowHidden = false)
+                    } else {
+                        bitmap?.takeUnless { it.isRecycled }?.recycle()
+                    }
+                    if (destroyed) return@post
+                    if (currentPreparationPending || superseded) {
+                        scheduleCurrentFramePreparation()
+                    } else {
+                        scheduleNextFramePreparation()
+                    }
+                }
+            }
         }
 
         // Prepares the following wallpaper away from Android's wallpaper event thread.
@@ -339,7 +458,13 @@ class WakeWallService : WallpaperService() {
                     } else {
                         bitmap?.takeUnless { it.isRecycled }?.recycle()
                     }
-                    if (generation == preparationGeneration) preparingIndex = -1
+                    preparingIndex = -1
+                    if (destroyed) return@post
+                    if (currentPreparationPending) {
+                        scheduleCurrentFramePreparation()
+                    } else {
+                        scheduleNextFramePreparation()
+                    }
                 }
             }
         }
@@ -357,37 +482,27 @@ class WakeWallService : WallpaperService() {
         private fun ensureCurrentFrame(activeStore: WakeWallStore): Bitmap? {
             val frame = surfaceHolder.surfaceFrame
             if (frame.width() <= 0 || frame.height() <= 0) return null
+            val targetWidth = frameBufferWidth(frame.width())
+            val targetHeight = frame.height()
 
             val existing = currentFrameBitmap
             if (currentFrameIndex == currentIndex &&
                 existing != null &&
                 !existing.isRecycled &&
-                existing.width == frameBufferWidth(frame.width()) &&
-                existing.height == frame.height()
+                existing.width == targetWidth &&
+                existing.height == targetHeight
             ) {
                 return existing
             }
 
-            val bitmap = existing
-                ?.takeIf {
-                    !it.isRecycled &&
-                        it.width == frameBufferWidth(frame.width()) &&
-                        it.height == frame.height()
-                }
-                ?: runCatching {
-                    Bitmap.createBitmap(frameBufferWidth(frame.width()), frame.height(), Bitmap.Config.ARGB_8888)
-                }.getOrNull()
-                ?: return null
-            val rendered = try {
-                drawWallpaper(Canvas(bitmap), currentIndex, activeStore)
-                true
-            } catch (_: Exception) {
-                false
-            } catch (_: OutOfMemoryError) {
-                false
-            }
-            if (!rendered) {
-                bitmap.takeUnless { it.isRecycled }?.recycle()
+            val bitmap = renderFrameBitmap(
+                index = currentIndex,
+                activeStore = activeStore,
+                width = targetWidth,
+                height = targetHeight,
+                scrolling = scrollingEnabled,
+            )
+            if (bitmap == null) {
                 currentFrameBitmap = null
                 currentFrameIndex = -1
                 return null
@@ -400,9 +515,50 @@ class WakeWallService : WallpaperService() {
             return bitmap
         }
 
+        // Decodes a finished render directly, falling back to the normal renderer if needed.
+        private fun renderFrameBitmap(
+            index: Int,
+            activeStore: WakeWallStore,
+            width: Int,
+            height: Int,
+            scrolling: Boolean,
+        ): Bitmap? {
+            val cachedFrame = activeStore.wallpaperRenderFile(index, scrolling)
+                ?.let { file ->
+                    runCatching {
+                        BitmapFactory.decodeFile(
+                            file.absolutePath,
+                            BitmapFactory.Options().apply {
+                                inPreferredConfig = Bitmap.Config.ARGB_8888
+                                inMutable = true
+                            },
+                        )
+                    }.getOrNull()
+                }
+            if (cachedFrame != null && cachedFrame.width == width && cachedFrame.height == height) {
+                return cachedFrame
+            }
+            cachedFrame?.takeUnless { it.isRecycled }?.recycle()
+
+            val bitmap = runCatching {
+                Bitmap.createBitmap(width, height, Bitmap.Config.ARGB_8888)
+            }.getOrNull() ?: return null
+            val rendered = try {
+                drawWallpaper(Canvas(bitmap), index, activeStore)
+                true
+            } catch (_: Exception) {
+                false
+            } catch (_: OutOfMemoryError) {
+                false
+            }
+            if (rendered) return bitmap
+            bitmap.takeUnless { it.isRecycled }?.recycle()
+            return null
+        }
+
         private fun invalidateFrames() {
             preparationGeneration += 1
-            preparingIndex = -1
+            currentPreparationPending = false
             currentFrameBitmap?.takeUnless { it.isRecycled }?.recycle()
             currentFrameBitmap = null
             currentFrameIndex = -1
@@ -782,6 +938,7 @@ class WakeWallService : WallpaperService() {
 
     companion object {
         const val ACTION_CONFIGURATION_UPDATED = "com.sprecious.wakewall.CONFIGURATION_UPDATED"
+        const val ACTION_CURRENT_CHANGED = "com.sprecious.wakewall.CURRENT_CHANGED"
         const val ACTION_CROP_UPDATED = "com.sprecious.wakewall.CROP_UPDATED"
     }
 }

@@ -574,10 +574,18 @@ class WakeWallStore(context: Context) {
         prefs.getInt(fitBackgroundColorKey(value), DEFAULT_FIT_BACKGROUND_COLOR)
 
     fun configuration(): Map<String, Any> {
-        // Full configuration includes preview bytes and can be expensive.
+        // Startup needs every thumbnail, but only the selected missing main preview is blocking.
         migrateExternalImages()
+        val selectedIndex = index
         return state() + mapOf(
-            "wallpapers" to activeWallpapers.mapIndexed(::wallpaperMap),
+            "wallpapers" to activeWallpapers.mapIndexed { wallpaperIndex, value ->
+                wallpaperMap(
+                    index = wallpaperIndex,
+                    value = value,
+                    generateMissingMainPreview = wallpaperIndex == selectedIndex,
+                    includeSourcePreview = false,
+                )
+            },
             "albums" to albums.map(WallpaperAlbum::asMap),
             "activeAlbumIds" to activeAlbumIds.toList(),
             "askAlbumsAfterImport" to askAlbumsAfterImport,
@@ -609,12 +617,47 @@ class WakeWallStore(context: Context) {
         val saved = wallpapers
         return values.mapNotNull { value ->
             val index = activeWallpapers.indexOf(value)
-            if (value in saved) wallpaperMap(index.coerceAtLeast(0), value) else null
+            if (value in saved) {
+                wallpaperMap(
+                    index = index.coerceAtLeast(0),
+                    value = value,
+                    generateMissingMainPreview = true,
+                    includeSourcePreview = false,
+                )
+            } else {
+                null
+            }
         }
     }
 
     fun wallpaperMapAt(index: Int): Map<String, Any>? =
-        wallpaperAt(index)?.let { wallpaperMap(index, it) }
+        wallpaperAt(index)?.let {
+            wallpaperMap(
+                index = index,
+                value = it,
+                generateMissingMainPreview = true,
+                includeSourcePreview = true,
+            )
+        }
+
+    fun mainPreview(value: String): ByteArray? {
+        if (value !in wallpapers || value.startsWith(SAMPLE_PREFIX)) return null
+        return croppedPreview(value, MAIN_PREVIEW_WIDTH, 96, "main_crop_v3")
+    }
+
+    fun editorPreview(value: String): ByteArray? {
+        if (value !in wallpapers || value.startsWith(SAMPLE_PREFIX)) return null
+        return cachedSourcePreview(value)
+    }
+
+    // Rebuilds non-blocking main previews gradually after the home screen is available.
+    fun prepareMainPreviews() {
+        wallpapers.forEach { value ->
+            if (!value.startsWith(SAMPLE_PREFIX)) {
+                ensureCroppedPreviewFile(value, MAIN_PREVIEW_WIDTH, 96, "main_crop_v3")
+            }
+        }
+    }
 
     // Writes the complete wallpaper collection and its settings into one portable file.
     fun writeBackup(output: java.io.OutputStream) {
@@ -946,7 +989,12 @@ class WakeWallStore(context: Context) {
     }
 
     // Creates the small preview Flutter displays without passing the full photo.
-    private fun wallpaperMap(index: Int, value: String): Map<String, Any> {
+    private fun wallpaperMap(
+        index: Int,
+        value: String,
+        generateMissingMainPreview: Boolean,
+        includeSourcePreview: Boolean,
+    ): Map<String, Any> {
         // This is the only native-to-Flutter shape for a wallpaper row.
         val result = mutableMapOf<String, Any>(
             "crop" to crop(value).asMap(),
@@ -961,22 +1009,38 @@ class WakeWallStore(context: Context) {
 
         result["uri"] = value
         result["name"] = displayName(value)
-        val sourcePreview = cachedSourcePreview(value)
-        val displayDimensions = sourcePreview?.let(::imageDimensions) ?: imageDimensions(value)
-        displayDimensions?.let { (width, height) ->
+        imageDimensions(value)?.let { (width, height) ->
             result["imageWidth"] = width
             result["imageHeight"] = height
         }
-        ensureWallpaperRenderFile(value, scrolling = false)
-        if (wallpaperScrolling) ensureWallpaperRenderFile(value, scrolling = true)
-        croppedPreview(value, MAIN_PREVIEW_WIDTH, 96, "main_crop_v3")?.let {
+        val mainPreview = cachedCroppedPreview(value, "main_crop_v3")
+            ?: if (generateMissingMainPreview) {
+                croppedPreview(value, MAIN_PREVIEW_WIDTH, 96, "main_crop_v3")
+            } else {
+                null
+            }
+        mainPreview?.let {
             result["mainPreview"] = it
         }
         croppedPreview(value, SMALL_PREVIEW_WIDTH, 84, "small_crop_v2")?.let {
             result["thumbnail"] = it
         }
-        sourcePreview?.let { result["preview"] = it }
+        if (includeSourcePreview) {
+            cachedSourcePreview(value)?.let { result["preview"] = it }
+        }
         return result
+    }
+
+    private fun cachedCroppedPreview(value: String, suffix: String): ByteArray? {
+        val file = File(
+            File(appContext.cacheDir, "wallpaper_previews"),
+            "${storageKey(value)}_$suffix.jpg",
+        )
+        if (!file.isFile || file.length() <= 0) return null
+        return runCatching { file.readBytes() }.getOrElse {
+            file.delete()
+            null
+        }
     }
 
     private fun displayName(value: String): String {

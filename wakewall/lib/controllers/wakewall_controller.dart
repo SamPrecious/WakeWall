@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:collection';
 import 'dart:math' as math;
 
@@ -17,6 +18,8 @@ class WakeWallController extends ChangeNotifier {
   final List<Wallpaper> _wallpapers = [];
   final List<WallpaperAlbum> _albums = [];
   final ValueNotifier<int> _selectedIndexNotifier = ValueNotifier<int>(0);
+  final Map<String, Future<void>> _mainPreviewLoads = {};
+  final Map<String, Future<void>> _editorPreviewLoads = {};
   Set<String> _activeAlbumIds = {};
   bool _askAlbumsAfterImport = true;
   Set<String> _defaultImportAlbumIds = {};
@@ -34,6 +37,8 @@ class WakeWallController extends ChangeNotifier {
   Future<void>? _initialization;
   bool _initialConfigurationLoaded = false;
   int? _knownWallpaperCount;
+  int _selectionSerial = 0;
+  bool _disposed = false;
 
   List<Wallpaper> get wallpapers => UnmodifiableListView(_wallpapers);
   List<WallpaperAlbum> get albums => UnmodifiableListView(_albums);
@@ -106,14 +111,83 @@ class WakeWallController extends ChangeNotifier {
 
   Future<void> select(int index) async {
     if (index < 0 || index >= _wallpapers.length) return;
+    final serial = ++_selectionSerial;
+    unawaited(ensureMainPreview(index));
     // Update the UI first, then let Android confirm the real current index.
     _setSelectedIndex(index);
     await _runNative(() async {
       final selected = await _bridge.setCurrent(index);
-      if (selected != null && selected >= 0 && selected < _wallpapers.length) {
+      if (serial == _selectionSerial &&
+          selected != null &&
+          selected >= 0 &&
+          selected < _wallpapers.length) {
         _setSelectedIndex(selected);
       }
     });
+  }
+
+  // Fetches a missing large preview once without blocking wallpaper selection.
+  Future<void> ensureMainPreview(int index) {
+    if (index < 0 || index >= _wallpapers.length) return Future.value();
+    final wallpaper = _wallpapers[index];
+    if (!wallpaper.isUserImage || wallpaper.mainPreview != null) {
+      return Future.value();
+    }
+    return _mainPreviewLoads.putIfAbsent(
+      wallpaper.id,
+      () => _loadMainPreview(wallpaper.id),
+    );
+  }
+
+  Future<void> _loadMainPreview(String wallpaperId) async {
+    try {
+      final bytes = await _bridge.mainPreview(wallpaperId);
+      if (bytes == null || bytes.isEmpty || _disposed) return;
+      final index = _wallpapers.indexWhere((item) => item.id == wallpaperId);
+      if (index < 0 || _wallpapers[index].mainPreview != null) return;
+      _wallpapers[index] = _wallpapers[index].copyWith(mainPreview: bytes);
+      notifyListeners();
+    } on MissingPluginException {
+      // Sample/non-Android builds do not have native preview generation.
+    } on PlatformException {
+      // The preview can remain unavailable without breaking selection.
+    } catch (_) {
+      // Damaged sources use the normal unavailable-preview state.
+    } finally {
+      _mainPreviewLoads.remove(wallpaperId);
+    }
+  }
+
+  // Loads the larger full-aspect source only when the crop editor needs it.
+  Future<void> ensureEditorPreview(int index) {
+    if (index < 0 || index >= _wallpapers.length) return Future.value();
+    final wallpaper = _wallpapers[index];
+    if (!wallpaper.isUserImage || wallpaper.preview != null) {
+      return Future.value();
+    }
+    return _editorPreviewLoads.putIfAbsent(
+      wallpaper.id,
+      () => _loadEditorPreview(wallpaper.id),
+    );
+  }
+
+  Future<void> _loadEditorPreview(String wallpaperId) async {
+    try {
+      final bytes = await _bridge.editorPreview(wallpaperId);
+      if (bytes == null || bytes.isEmpty || _disposed) return;
+      final index = _wallpapers.indexWhere((item) => item.id == wallpaperId);
+      if (index < 0 || _wallpapers[index].preview != null) return;
+      _wallpapers[index] = _wallpapers[index].copyWith(preview: bytes);
+      notifyListeners();
+    } on MissingPluginException {
+      // Sample/non-Android builds do not have native preview generation.
+    } on PlatformException {
+      // The editor reports an unavailable source without changing saved data.
+    } catch (_) {
+      // Damaged sources use the editor's unavailable-preview state.
+    } finally {
+      _editorPreviewLoads.remove(wallpaperId);
+    }
   }
 
   // Saves a crop in the app and sends the same position to Android.
@@ -154,11 +228,12 @@ class WakeWallController extends ChangeNotifier {
 
   Future<void> next() async {
     if (_wallpapers.isEmpty) return;
+    final serial = ++_selectionSerial;
     // Manual next feels instant while Android updates the live wallpaper.
     _setSelectedIndex((_selectedIndex + 1) % _wallpapers.length);
     await _runNative(() async {
       final next = await _bridge.showNext();
-      if (next != null) {
+      if (serial == _selectionSerial && next != null) {
         _setSelectedIndex(next % _wallpapers.length);
       }
     });
@@ -493,10 +568,19 @@ class WakeWallController extends ChangeNotifier {
     final savedWallpapers =
         configuration['wallpapers'] as List<Object?>? ?? const [];
     if (savedWallpapers.isNotEmpty || configuration.containsKey('wallpapers')) {
+      final existingById = {for (final item in _wallpapers) item.id: item};
       final restored = <Wallpaper>[];
       for (final value in savedWallpapers) {
         final wallpaper = _wallpaperFromNative(value);
-        if (wallpaper != null) restored.add(wallpaper);
+        if (wallpaper == null) continue;
+        final existing = existingById[wallpaper.id];
+        restored.add(
+          wallpaper.copyWith(
+            thumbnail: wallpaper.thumbnail ?? existing?.thumbnail,
+            mainPreview: wallpaper.mainPreview ?? existing?.mainPreview,
+            preview: wallpaper.preview ?? existing?.preview,
+          ),
+        );
       }
       _wallpapers
         ..clear()
@@ -634,6 +718,7 @@ class WakeWallController extends ChangeNotifier {
 
   @override
   void dispose() {
+    _disposed = true;
     _selectedIndexNotifier.dispose();
     super.dispose();
   }

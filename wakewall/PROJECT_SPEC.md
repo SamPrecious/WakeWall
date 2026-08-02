@@ -122,6 +122,11 @@ Important invariants:
 - Shuffle must not visibly double-skip.
 - Do not add timing guards or throttles that prevent rapid screen-off/on cycling.
 - Keep expensive decoding and rendering away from the screen-event thread.
+- Manual in-app selection should reuse an already prepared engine frame when
+  possible. If the hidden engine needs another frame, prepare it at background
+  priority rather than competing with Flutter's tap response.
+- Superseded engine preparation may finish, but it must not queue one expensive
+  render per rapid tap; resume once with the latest requested wallpaper.
 
 ### Rotation Modes
 
@@ -234,10 +239,21 @@ replace stale derivatives.
 Derived caches are published only after the complete file is written. Empty or
 interrupted cache files are invalid and must be regenerated.
 
+After Android cache is cleared, startup rebuilds the small `Up Next` thumbnails
+and only the selected wallpaper's missing 1080-pixel main preview before showing
+Home. Existing main previews for the rest of the collection are loaded directly;
+missing ones warm at background priority after Home is usable and are requested
+on demand when selected. Full-aspect crop-editor sources are generated only when
+the editor opens, while native live-wallpaper renders remain owned by the
+engine's current/next frame preparation.
+
 ### Runtime Frames
 
 The live wallpaper engine keeps current and next rendered frames in memory so
 screen-off switching can copy pixels instead of decoding an original image.
+When a finished render already matches the wallpaper surface, it is decoded
+directly into the retained mutable frame rather than copied through a second
+full-screen bitmap.
 Temporary bitmaps must be recycled when replaced or when an engine is destroyed.
 
 ### Cleanup
@@ -328,10 +344,14 @@ placed directly beside the feature it controls.
   saved library is genuinely empty. A fast wallpaper count reserves the normal
   populated layout while the heavier preview configuration loads, with delayed
   progress feedback so normal fast launches do not flash a spinner.
-- Thumbnail taps should update the selected wallpaper immediately; native
-  `setCurrent` sync stays asynchronous and must not delay the visible preview.
-- Preview warmup should focus on the selected and nearby wallpapers rather than
-  eagerly decoding an entire large collection.
+- Pressing a thumbnail should immediately request that wallpaper's dedicated
+  1080-pixel preview in the large card; never enlarge the low-resolution strip
+  thumbnail or add a local fade as a substitute for responsive switching.
+- A native response from an older rapid tap must never overwrite a newer local
+  selection.
+- Full-preview warmup uses one debounced worker for the nearby queue window and
+  abandons stale neighbour work so rapid taps cannot build competing main-preview
+  decode queues.
 - `Up Next` thumbnails may use cheaper image filtering than the large preview.
 - The large preview switches selected wallpapers directly, without a local fade,
   so thumbnail taps feel immediate.

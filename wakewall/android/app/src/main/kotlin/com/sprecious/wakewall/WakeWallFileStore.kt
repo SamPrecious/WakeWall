@@ -122,6 +122,7 @@ class WakeWallFileStore(
             "main",
             "large",
             "main_crop_v2",
+            "main_crop_v4",
             "wallpaper_scroll_v1",
             "wallpaper_scroll_v2",
         )

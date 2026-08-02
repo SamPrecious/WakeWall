@@ -12,5 +12,8 @@
   settings.
 - After completed development changes, start `flutter build apk --release` from
   this directory without monitoring it unless the user asks for build output.
+- After every successful release build, leave the final artifact named
+  `WakeWall.apk` and replace `F:\My Drive\WakeWall\WakeWall.apk` using a
+  delete-then-copy flow. Verify that the copied APK matches the local build.
+  Continue doing this by default until the user explicitly asks to stop.
 - Use the verification commands documented in `PROJECT_SPEC.md`.
-

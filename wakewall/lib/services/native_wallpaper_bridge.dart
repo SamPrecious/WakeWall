@@ -52,6 +52,14 @@ class NativeWallpaperBridge {
     return _channel.invokeMethod<int>('setCurrent', {'index': index});
   }
 
+  Future<Uint8List?> mainPreview(String value) {
+    return _channel.invokeMethod<Uint8List>('mainPreview', {'value': value});
+  }
+
+  Future<Uint8List?> editorPreview(String value) {
+    return _channel.invokeMethod<Uint8List>('editorPreview', {'value': value});
+  }
+
   Future<Map<String, Object?>> pickImages() async {
     final result = await _channel.invokeMapMethod<String, Object?>(
       'pickImages',
