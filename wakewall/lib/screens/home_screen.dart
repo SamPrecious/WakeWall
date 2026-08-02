@@ -11,6 +11,7 @@ import '../navigation/app_router.dart';
 import '../services/native_wallpaper_bridge.dart';
 import '../theme/wakewall_theme.dart';
 import '../widgets/abstract_wallpaper.dart';
+import '../widgets/privacy_policy_action.dart';
 import '../widgets/wakewall_notice.dart';
 
 const _wallpaperStripHeaderHeight = 34.0;
@@ -2221,6 +2222,8 @@ class _SettingsSheetState extends State<_SettingsSheet> {
                           : 'Use WakeWall',
                     ),
                   ),
+                  const SizedBox(height: 10),
+                  const PrivacyPolicyAction(),
                 ],
               ),
             ),

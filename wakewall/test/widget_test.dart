@@ -11,6 +11,7 @@ import 'package:wakewall/models/wallpaper.dart';
 import 'package:wakewall/services/native_wallpaper_bridge.dart';
 import 'package:wakewall/theme/wakewall_theme.dart';
 import 'package:wakewall/widgets/abstract_wallpaper.dart';
+import 'package:wakewall/widgets/privacy_policy_action.dart';
 
 void main() {
   test('native action errors notify controller listeners', () async {
@@ -211,6 +212,8 @@ void main() {
     expect(find.text('Backup'), findsOneWidget);
     expect(find.text('Restore'), findsOneWidget);
     expect(find.text('Use WakeWall'), findsOneWidget);
+    expect(find.text('Privacy Policy'), findsOneWidget);
+    expect(find.text('How WakeWall handles your data'), findsOneWidget);
     expect(find.text('Wake-event diagnostics'), findsNothing);
     expect(find.text('Wallpaper Scrolling'), findsOneWidget);
   });
@@ -227,6 +230,67 @@ void main() {
 
     expect(find.text('WakeWall Is Active'), findsOneWidget);
     expect(find.text('Use WakeWall'), findsNothing);
+  });
+
+  testWidgets('privacy policy footer is accessible and opens the exact URL', (
+    tester,
+  ) async {
+    Uri? openedUri;
+    final semantics = tester.ensureSemantics();
+    await tester.pumpWidget(
+      MaterialApp(
+        theme: WakeWallTheme.dark,
+        home: Scaffold(
+          body: PrivacyPolicyAction(
+            launcher: (uri) async {
+              openedUri = uri;
+              return true;
+            },
+          ),
+        ),
+      ),
+    );
+
+    final action = find.byKey(const ValueKey('privacy-policy-action'));
+    expect(action, findsOneWidget);
+    final actionRect = tester.getRect(action);
+    expect(actionRect.height, greaterThanOrEqualTo(68));
+    expect(
+      tester.getSemantics(action),
+      matchesSemantics(
+        isLink: true,
+        label: 'Privacy Policy',
+        value: 'How WakeWall handles your data',
+        hint: 'Opens in your browser',
+        textDirection: TextDirection.ltr,
+      ),
+    );
+
+    // The trailing edge is part of the same full-row action, not icon-only UI.
+    await tester.tapAt(Offset(actionRect.right - 8, actionRect.center.dy));
+    await tester.pump();
+    expect(openedUri.toString(), wakeWallPrivacyPolicyUrl);
+    semantics.dispose();
+  });
+
+  testWidgets('privacy policy launch failure uses the WakeWall notice', (
+    tester,
+  ) async {
+    await tester.pumpWidget(
+      MaterialApp(
+        theme: WakeWallTheme.midnight,
+        home: Scaffold(body: PrivacyPolicyAction(launcher: (_) async => false)),
+      ),
+    );
+
+    await tester.tap(find.byKey(const ValueKey('privacy-policy-action')));
+    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 320));
+
+    expect(
+      find.text('WakeWall couldn\'t open the privacy policy.'),
+      findsOneWidget,
+    );
   });
 
   testWidgets('tapping a switch card toggles the setting', (tester) async {
@@ -497,6 +561,11 @@ void main() {
     );
     expect(settingsSheet.width, lessThanOrEqualTo(680));
     expect(settingsSheet.width, greaterThan(500));
+    await tester.ensureVisible(
+      find.byKey(const ValueKey('privacy-policy-action')),
+    );
+    await tester.pumpAndSettle();
+    expect(find.text('Privacy Policy'), findsOneWidget);
     expect(tester.takeException(), isNull);
 
     await tester.tap(find.byTooltip('Close Settings'));
@@ -535,6 +604,28 @@ void main() {
       findsOneWidget,
     );
     expect(find.text('WakeWall'), findsOneWidget);
+    expect(tester.takeException(), isNull);
+  });
+
+  testWidgets('privacy policy remains reachable on short settings sheets', (
+    tester,
+  ) async {
+    await tester.binding.setSurfaceSize(const Size(360, 560));
+    addTearDown(() => tester.binding.setSurfaceSize(null));
+    final controller = WakeWallController(bridge: _EmptyBridge());
+
+    await tester.pumpWidget(WakeWallApp(controller: controller));
+    await tester.pumpAndSettle();
+    await tester.tap(find.byTooltip('Settings'));
+    await tester.pumpAndSettle();
+
+    final action = find.byKey(const ValueKey('privacy-policy-action'));
+    await tester.ensureVisible(action);
+    await tester.pumpAndSettle();
+    final actionRect = tester.getRect(action);
+    expect(actionRect.height, greaterThanOrEqualTo(68));
+    expect(actionRect.top, greaterThanOrEqualTo(0));
+    expect(actionRect.bottom, lessThanOrEqualTo(560));
     expect(tester.takeException(), isNull);
   });
 

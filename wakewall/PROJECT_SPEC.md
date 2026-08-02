@@ -280,6 +280,7 @@ Temporary bitmaps must be recycled when replaced or when an engine is destroyed.
 - Backup
 - Restore
 - Use WakeWall / WakeWall Is Active
+- Privacy Policy footer, opened in the user's external browser
 
 Avoid adding a setting when the behavior can be automatic, contextual, or
 placed directly beside the feature it controls.
