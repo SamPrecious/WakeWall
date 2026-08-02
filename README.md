@@ -29,47 +29,144 @@ WakeWall utilises a native Android live wallpaper engine to prepare the next ima
 
 ## Demo
 
-Add GIFs or short screen recordings here as the release visuals come together. They are separated by feature so someone new to the project can understand the app quickly without reading every implementation detail first.
+WakeWall keeps its core workflow on one screen, then reveals more control only when it is useful. The screenshots below were captured on a 19.5:9 Samsung display. Select any screenshot to open the full-resolution image.
 
-### 1. Home Screen
-
-Show the main screen, large phone-shaped preview, `Up Next` strip, and quick actions.
-
-```md
-![WakeWall home screen](docs/gifs/home-screen.gif)
-```
-
-### 2. Automatic Rotation
-
-Show the wallpaper changing through the lock/wake cycle or via the manual next action.
-
-```md
-![WakeWall wallpaper rotation](docs/gifs/wallpaper-rotation.gif)
-```
-
-### 3. Crop And Display Modes
-
-Show the crop editor, pinch/drag adjustment, Fill, Blur, and Fit modes.
-
-```md
-![WakeWall crop editor](docs/gifs/crop-editor.gif)
-```
-
-### 4. Albums And Reordering
-
-Show album filtering, long-press drag-to-reorder, drag-to-remove, and Undo.
-
-```md
-![WakeWall albums and reordering](docs/gifs/albums-reorder-remove.gif)
-```
-
-### 5. Backup And Restore
-
-Show exporting or restoring a `.wakewall` backup file.
-
-```md
-![WakeWall backup and restore](docs/gifs/backup-restore.gif)
-```
+<table width="900">
+  <tr>
+    <td width="280" valign="top">
+      <a href="docs/screenshots/wakewall-home-19-5x9.jpg">
+        <img src="docs/screenshots/wakewall-home-19-5x9.jpg" width="260" alt="WakeWall home screen showing the current wallpaper and Up Next queue">
+      </a>
+    </td>
+    <td width="620" valign="top">
+      <h3>Everything you need, one screen</h3>
+      <p>The home screen is deliberately focused: a large, accurate preview of the active wallpaper sits above the collection that will rotate next.</p>
+      <ul>
+        <li><strong>Albums:</strong> open the top-left panel to create albums and choose which collections are currently visible and rotating.</li>
+        <li><strong>Settings:</strong> use the cog to control rotation order, pausing, themes, scrolling, backups, and wallpaper activation.</li>
+        <li><strong>Organise wallpaper:</strong> use the first preview control to add the current photo to one or more albums.</li>
+        <li><strong>Adjust wallpaper:</strong> open the crop editor to reposition, rotate, zoom, or change how the current photo fills the screen.</li>
+        <li><strong>Next wallpaper:</strong> advance the active wallpaper manually without waiting for the next screen wake.</li>
+        <li><strong>Add:</strong> import one or more new photos and optionally organise them into albums during the same flow.</li>
+        <li><strong>Up Next:</strong> scroll through the queue and select any thumbnail to display it immediately. Press and hold a thumbnail to reorder it, or drag it to the remove target to delete it with a short Undo window.</li>
+      </ul>
+    </td>
+  </tr>
+  <tr>
+    <td width="280" valign="top">
+      <a href="docs/screenshots/wakewall-crop-editor-19-5x9.jpg">
+        <img src="docs/screenshots/wakewall-crop-editor-19-5x9.jpg" width="260" alt="WakeWall crop editor with Fill, Blur and Fit display modes">
+      </a>
+    </td>
+    <td width="620" valign="top">
+      <h3>Fine-tune every wallpaper</h3>
+      <p>Every photo can be positioned for the phone rather than forced through one global crop. Pinch to zoom, drag to position, rotate when needed, and choose the display treatment that best suits the source image.</p>
+      <p><strong>Display modes</strong></p>
+      <ul>
+        <li><code>Fill</code> uses the full screen and allows edge cropping.</li>
+        <li><code>Blur</code> preserves the whole photo over a softened extension.</li>
+        <li><code>Fit</code> places the complete image over a chosen solid colour.</li>
+      </ul>
+      <p><strong>Image controls</strong></p>
+      <ul>
+        <li><strong>Rotate:</strong> turn the source image clockwise in 90-degree steps before positioning it.</li>
+        <li><strong>Reset:</strong> return zoom, position, rotation, display mode, and background colour to their defaults. The button appears only after something has been adjusted.</li>
+      </ul>
+      <p>WakeWall stores these choices per wallpaper and regenerates the native wallpaper render when the edit is saved.</p>
+    </td>
+  </tr>
+  <tr>
+    <td width="280" valign="top">
+      <a href="docs/screenshots/wakewall-albums-19-5x9.jpg">
+        <img src="docs/screenshots/wakewall-albums-19-5x9.jpg" width="260" alt="WakeWall Albums sheet with All Wallpapers and custom albums">
+      </a>
+    </td>
+    <td width="620" valign="top">
+      <h3>Group wallpapers into collections</h3>
+      <p>Albums let you group wallpapers around a person, place, theme, or occasion. A photo can belong to several albums while its image files remain stored only once.</p>
+      <ul>
+        <li><code>All Wallpapers</code> always provides a complete catch-all view.</li>
+        <li>Use the <code>+</code> button to create an album here, or create one while importing new photos.</li>
+        <li>Select one or several albums to combine their wallpapers in both the visible collection and the active rotation pool.</li>
+        <li>Press and hold an album to remove it. WakeWall can also delete photos exclusive to that album, while preserving any that belong to another album.</li>
+        <li>The bottom sheet keeps organisation close at hand without cluttering the home screen.</li>
+      </ul>
+    </td>
+  </tr>
+  <tr>
+    <td width="280" valign="top">
+      <a href="docs/screenshots/wakewall-space-and-animals-19-5x9.jpg">
+        <img src="docs/screenshots/wakewall-space-and-animals-19-5x9.jpg" width="260" alt="WakeWall home screen filtered to the Space and Animals albums">
+      </a>
+    </td>
+    <td width="620" valign="top">
+      <h3>Mix and match albums</h3>
+      <p>Selecting the <code>Space</code> and <code>Animals</code> themes combines both albums into one focused collection.</p>
+      <ul>
+        <li>The home screen and <code>Up Next</code> queue update to show wallpapers from either selected album.</li>
+        <li>Automatic rotation follows the same filtered collection.</li>
+        <li>Photos shared by both albums still appear only once and remain stored only once.</li>
+        <li>Changing the selection never moves or alters the underlying photos.</li>
+      </ul>
+    </td>
+  </tr>
+  <tr>
+    <td width="280" valign="top">
+      <a href="docs/screenshots/wakewall-album-selection-19-5x9.jpg">
+        <img src="docs/screenshots/wakewall-album-selection-19-5x9.jpg" width="260" alt="WakeWall album selection screen shown while assigning imported photos">
+      </a>
+    </td>
+    <td width="620" valign="top">
+      <h3>Organise photos as you add them</h3>
+      <p>Assign a photo using the album button on its main preview, or choose its albums when it is first imported.</p>
+      <ul>
+        <li>Select one or several albums for the imported photos.</li>
+        <li>Choose <code>No Album</code> to keep them in <code>All Wallpapers</code> only.</li>
+        <li>Use <code>+</code> to create a new album without leaving the import.</li>
+        <li><code>Don't Ask Me Again</code> can skip this step on future imports and be reversed later in Settings.</li>
+      </ul>
+    </td>
+  </tr>
+  <tr>
+    <td width="280" valign="top">
+      <a href="docs/screenshots/wakewall-add-wallpapers-19-5x9.jpg">
+        <img src="docs/screenshots/wakewall-add-wallpapers-19-5x9.jpg" width="260" alt="WakeWall Add Wallpapers sheet with Photos and Files import options">
+      </a>
+    </td>
+    <td width="620" valign="top">
+      <h3>Add photos from anywhere</h3>
+      <p>WakeWall supports two familiar Android import routes, making it easy to choose several wallpapers from the source that suits them.</p>
+      <ul>
+        <li><strong>Photos:</strong> use Android's polished photo picker for a focused, privacy-friendly selection.</li>
+        <li><strong>Files &amp; Other Apps:</strong> browse Gallery, Downloads, cloud storage, and other available file providers.</li>
+        <li><strong>Always Use My Choice:</strong> skip this question on future imports and change the preference later in Settings.</li>
+      </ul>
+    </td>
+  </tr>
+  <tr>
+    <td width="280" valign="top">
+      <a href="docs/screenshots/wakewall-settings-scrollshot.jpg">
+        <img src="docs/screenshots/wakewall-settings-scrollshot.jpg" width="260" alt="WakeWall Settings scrollshot showing all available preferences, backup controls, activation status, and the Privacy Policy link">
+      </a>
+    </td>
+    <td width="620" valign="top">
+      <h3>Set it up your way</h3>
+      <p>The full Settings sheet keeps everyday preferences, collection tools, and privacy information together without crowding the main screen.</p>
+      <ul>
+        <li><strong>Order:</strong> shuffle the collection for a surprise on each wake, or follow the queue from beginning to end.</li>
+        <li><strong>Pause WakeWall:</strong> keep the current wallpaper in place until automatic rotation is resumed.</li>
+        <li><strong>Theme:</strong> follow the phone's system setting or choose the Light, Dark, or deeper Midnight appearance.</li>
+        <li><strong>Wallpaper Scrolling:</strong> let the wallpaper move as the user swipes between Home screens on launchers that support it.</li>
+        <li><strong>Photo Source:</strong> ask on every import, or go straight to the Android Photos or Files picker.</li>
+        <li><strong>Choose Albums After Import:</strong> decide immediately which albums should receive newly added wallpapers.</li>
+        <li><strong>Ultra High Resolution:</strong> optionally skip WakeWall's normal import caps for very large new photos. The feature is marked experimental because it uses more storage and device resources.</li>
+        <li><strong>Backup &amp; Restore:</strong> export or recover the collection together with its order, crops, albums, display modes, and settings.</li>
+        <li><strong>Activation:</strong> see whether WakeWall is currently the active wallpaper and activate it from the same place when needed.</li>
+        <li><strong>Privacy Policy:</strong> open a clear account of how WakeWall handles data; chosen images and app data remain on the device.</li>
+      </ul>
+    </td>
+  </tr>
+</table>
 
 ## Built With
 
