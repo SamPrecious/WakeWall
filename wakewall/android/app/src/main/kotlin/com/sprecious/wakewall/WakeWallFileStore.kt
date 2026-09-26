@@ -4,6 +4,8 @@ import android.content.Context
 import android.net.Uri
 import java.io.File
 import java.io.InputStream
+import java.util.concurrent.locks.ReentrantLock
+import kotlin.concurrent.withLock
 
 // Owns WakeWall's private files and removes anything no longer referenced.
 class WakeWallFileStore(
@@ -29,17 +31,22 @@ class WakeWallFileStore(
     fun importStagingDirectory(): File =
         File(appContext.filesDir, IMPORT_STAGING_DIRECTORY).apply { mkdirs() }
 
-    fun deleteRemovalFiles(value: String) {
+    // Crop edits, derivative generation, and deletion share a bounded set of per-image locks.
+    fun <T> withPreviewLock(value: String, action: () -> T): T =
+        previewLock(storageKey(value)).withLock(action)
+
+    fun deleteRemovalFiles(value: String) = withPreviewLock(value) {
         localFile(value)?.delete()
         deleteCachedPreviews(value)
         deleteMetadata(value)
     }
 
-    fun deleteCachedPreviews(value: String) {
+    fun deleteCachedPreviews(value: String) = withPreviewLock(value) {
         val directory = previewDirectory()
+        val key = storageKey(value)
         // Delete both stable-key and older hash-key previews from previous builds.
         PREVIEW_SUFFIXES.forEach {
-            File(directory, "${storageKey(value)}_$it.jpg").delete()
+            File(directory, "${key}_$it.jpg").delete()
             File(directory, "${value.hashCode()}_$it.jpg").delete()
         }
     }
@@ -49,17 +56,24 @@ class WakeWallFileStore(
         val retained = (activeWallpapers() + pendingRemovals()).toSet()
         val retainedLocalNames = retained.mapNotNull { localFile(it)?.name }.toSet()
         wallpaperDirectory().listFiles()?.forEach { file ->
-            if (file.isFile && file.name !in retainedLocalNames) file.delete()
+            if (file.isFile && file.name !in retainedLocalNames) {
+                withPreviewLock("$LOCAL_PREFIX${file.name}") { file.delete() }
+            }
         }
 
         val retainedPreviewNames = retained.flatMap { value ->
+            val key = storageKey(value)
             CURRENT_PREVIEW_SUFFIXES.map { suffix ->
-                "${storageKey(value)}_$suffix.jpg"
+                "${key}_$suffix.jpg"
             }
         }.toSet()
         previewDirectory().listFiles()?.forEach { file ->
             if (file.isFile && file.name !in retainedPreviewNames) {
-                file.delete()
+                val lock = previewLock(file.name.substringBefore('_'))
+                // Skip an active writer; abandoned temporary files are cleaned on the next pass.
+                if (lock.tryLock()) {
+                    try { file.delete() } finally { lock.unlock() }
+                }
             }
         }
     }
@@ -108,6 +122,9 @@ class WakeWallFileStore(
         File(appContext.cacheDir, "wallpaper_previews")
 
     companion object {
+        private val PREVIEW_LOCKS = Array(32) { ReentrantLock() }
+        private fun previewLock(key: String) =
+            PREVIEW_LOCKS[(key.hashCode() and Int.MAX_VALUE) % PREVIEW_LOCKS.size]
         const val IMPORT_STAGING_DIRECTORY = "wallpaper_imports"
         private const val LOCAL_PREFIX = "local:"
         private val CURRENT_PREVIEW_SUFFIXES = listOf(

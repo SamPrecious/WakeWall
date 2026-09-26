@@ -119,8 +119,8 @@ class WakeWallStore(context: Context) {
         }
 
     val activeWallpapers: List<String>
-        get() = activeWallpaperSnapshot ?: buildActiveWallpapers().also {
-            activeWallpaperSnapshot = it
+        get() = activeWallpaperSnapshot ?: synchronized(this) {
+            activeWallpaperSnapshot ?: buildActiveWallpapers().also { activeWallpaperSnapshot = it }
         }
 
     // Album filters are views over one wallpaper list, not separate folders.
@@ -133,7 +133,7 @@ class WakeWallStore(context: Context) {
         }
     }
 
-    fun refreshActiveWallpapers() {
+    @Synchronized fun refreshActiveWallpapers() {
         activeWallpaperSnapshot = null
     }
 
@@ -141,7 +141,10 @@ class WakeWallStore(context: Context) {
         get() = activeWallpapers.size
 
     val index: Int
-        get() = if (wallpaperCount == 0) 0 else prefs.getInt("index", 0).mod(wallpaperCount)
+        get() {
+            val count = wallpaperCount
+            return if (count == 0) 0 else prefs.getInt("index", 0).mod(count)
+        }
 
     fun wallpaperAt(index: Int): String? = activeWallpapers.getOrNull(index)
 
@@ -437,13 +440,14 @@ class WakeWallStore(context: Context) {
 
     // Chooses the next wallpaper using the selected order and pause setting.
     fun nextIndex(current: Int, allowWhenPaused: Boolean = false): Int {
-        if (paused && !allowWhenPaused || wallpaperCount <= 1) return current
+        val count = wallpaperCount
+        if (paused && !allowWhenPaused || count <= 1) return current
         return if (shuffle) {
             val seed = prefs.getInt("change_count", 0).toLong() shl 32 xor current.toLong()
-            val offset = Random(seed).nextInt(wallpaperCount - 1) + 1
-            (current + offset).mod(wallpaperCount)
+            val offset = Random(seed).nextInt(count - 1) + 1
+            (current + offset).mod(count)
         } else {
-            (current + 1).mod(wallpaperCount)
+            (current + 1).mod(count)
         }
     }
 
@@ -459,11 +463,11 @@ class WakeWallStore(context: Context) {
     }
 
     // Advances once even when Android has created several wallpaper engines.
-    fun advanceForScreenOff(expectedCurrent: Int): Int = transactionStore.locked {
+    fun advanceForScreenOff(expectedCurrent: Int): Int = synchronized(ROTATION_LOCK) {
         val current = index
-        if (current != expectedCurrent) return@locked current
+        if (current != expectedCurrent) return@synchronized current
         val next = nextIndex(current)
-        if (next == current || next !in activeWallpapers.indices) return@locked current
+        if (next == current || next !in activeWallpapers.indices) return@synchronized current
         prefs.edit()
             .putInt("index", next)
             .putString("last_trigger", "screen_off")
@@ -483,20 +487,22 @@ class WakeWallStore(context: Context) {
         rotationQuarterTurns: Int = 0,
     ) {
         val value = wallpaperAt(index) ?: return
-        // Rotation is baked into the private source; crop values stay simple afterward.
-        rotateLocalSource(value, rotationQuarterTurns)
-        val key = cropKey(value)
-        prefs.edit()
-            .putFloat("${key}_scale", scale.toFloat())
-            .putFloat("${key}_x", offsetX.toFloat())
-            .putFloat("${key}_y", offsetY.toFloat())
-            .putString(displayModeKey(value), normalizedDisplayMode(displayMode))
-            .putInt(fitBackgroundColorKey(value), fitBackgroundColor or 0xFF000000.toInt())
-            .remove("${legacyCropKey(value)}_scale")
-            .remove("${legacyCropKey(value)}_x")
-            .remove("${legacyCropKey(value)}_y")
-            .apply()
-        deleteCachedPreviews(value)
+        fileStore.withPreviewLock(value) {
+            // Rotation is baked into the private source; crop values stay simple afterward.
+            check(rotateLocalSource(value, rotationQuarterTurns)) { "WakeWall could not rotate this photo." }
+            val key = cropKey(value)
+            prefs.edit()
+                .putFloat("${key}_scale", scale.toFloat())
+                .putFloat("${key}_x", offsetX.toFloat())
+                .putFloat("${key}_y", offsetY.toFloat())
+                .putString(displayModeKey(value), normalizedDisplayMode(displayMode))
+                .putInt(fitBackgroundColorKey(value), fitBackgroundColor or 0xFF000000.toInt())
+                .remove("${legacyCropKey(value)}_scale")
+                .remove("${legacyCropKey(value)}_x")
+                .remove("${legacyCropKey(value)}_y")
+                .apply()
+            deleteCachedPreviews(value)
+        }
     }
 
     private fun rotateLocalSource(value: String, quarterTurns: Int): Boolean {
@@ -533,7 +539,6 @@ class WakeWallStore(context: Context) {
             original.isFile && original.length() > 0
         }.getOrDefault(false)
         replacement.delete()
-        if (replaced) deleteCachedPreviews(value)
         return replaced
     }
 
@@ -773,7 +778,7 @@ class WakeWallStore(context: Context) {
             for (position in 0 until entries.length()) {
                 val item = entries.getJSONObject(position)
                 val source = File(restoreRoot, item.getString("file").substringAfterLast('/'))
-                require(source.isFile && imageDimensions(source) != null) {
+                require(source.isFile && validateOriginal(source)) {
                     "A wallpaper in this backup is damaged."
                 }
                 val crop = item.optJSONObject("crop") ?: JSONObject()
@@ -964,10 +969,17 @@ class WakeWallStore(context: Context) {
 
     private fun legacyNameKey(value: String): String = "name_${value.hashCode()}"
 
-    private fun storageKey(value: String): String =
-        MessageDigest.getInstance("SHA-256")
-            .digest(value.toByteArray())
-            .joinToString("") { "%02x".format(it) }
+    private fun storageKey(value: String): String {
+        val digest = MessageDigest.getInstance("SHA-256").digest(value.toByteArray())
+        val hex = "0123456789abcdef"
+        return buildString(64) {
+            digest.forEach { byte ->
+                val unsigned = byte.toInt() and 0xff
+                append(hex[unsigned ushr 4])
+                append(hex[unsigned and 0xf])
+            }
+        }
+    }
 
     private fun floatPreference(key: String, legacyKey: String, default: Float): Float =
         if (prefs.contains(key)) prefs.getFloat(key, default) else prefs.getFloat(legacyKey, default)
@@ -1082,13 +1094,13 @@ class WakeWallStore(context: Context) {
     }
 
     // Keeps a full-aspect source preview available for the crop editor.
-    private fun cachedSourcePreview(value: String): ByteArray? {
+    private fun cachedSourcePreview(value: String): ByteArray? = fileStore.withPreviewLock(value) {
         val directory = File(appContext.cacheDir, "wallpaper_previews").apply { mkdirs() }
         val file = File(directory, "${storageKey(value)}_source.jpg")
-        if (file.isFile && file.length() > 0) return runCatching { file.readBytes() }.getOrNull()
+        if (file.isFile && file.length() > 0) return@withPreviewLock runCatching { file.readBytes() }.getOrNull()
         file.delete()
-        val bitmap = fullAspectPreview(value, SOURCE_PREVIEW_EDGE) ?: return null
-        return try {
+        val bitmap = fullAspectPreview(value, SOURCE_PREVIEW_EDGE) ?: return@withPreviewLock null
+        try {
             if (writeBitmapCache(bitmap, file, 94)) {
                 runCatching { file.readBytes() }.getOrNull()
             } else {
@@ -1169,6 +1181,27 @@ class WakeWallStore(context: Context) {
     ): File? {
         val directory = File(appContext.cacheDir, "wallpaper_previews").apply { mkdirs() }
         val file = File(directory, "${storageKey(value)}_$suffix.jpg")
+        return fileStore.withPreviewLock(value) {
+            ensureCroppedPreviewFileLocked(
+                value = value,
+                targetWidth = targetWidth,
+                quality = quality,
+                file = file,
+                targetHeight = targetHeight,
+                scrollingViewportWidth = scrollingViewportWidth,
+            )
+        }
+    }
+
+    // Several Android engines may request the same missing render at once.
+    private fun ensureCroppedPreviewFileLocked(
+        value: String,
+        targetWidth: Int,
+        quality: Int,
+        file: File,
+        targetHeight: Int?,
+        scrollingViewportWidth: Int?,
+    ): File? {
         if (file.isFile && file.length() > 0) return file
         file.delete()
 
@@ -1249,7 +1282,7 @@ class WakeWallStore(context: Context) {
 
     // Publishes complete cache files so process death cannot leave a partial preview in use.
     private fun writeBitmapCache(bitmap: Bitmap, destination: File, quality: Int): Boolean {
-        val temporary = File(destination.parentFile, ".wakewall_${UUID.randomUUID()}.tmp")
+        val temporary = File(destination.parentFile, "${destination.name}.tmp")
         return try {
             val compressed = temporary.outputStream().buffered().use {
                 bitmap.compress(Bitmap.CompressFormat.JPEG, quality, it)
@@ -1861,6 +1894,8 @@ class WakeWallStore(context: Context) {
         fileStore.importStagingDirectory()
 
     companion object {
+        // Screen-off coordination must never wait for file cleanup or import transactions.
+        private val ROTATION_LOCK = Any()
         private const val MAX_IMAGE_EDGE = 6144f
         private const val VALIDATION_IMAGE_EDGE = 2048f
         private const val SMALL_PREVIEW_WIDTH = 180

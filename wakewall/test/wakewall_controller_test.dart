@@ -9,6 +9,68 @@ import 'package:wakewall/models/wallpaper.dart';
 import 'package:wakewall/services/native_wallpaper_bridge.dart';
 
 void main() {
+  test('late resume response cannot undo a newer thumbnail selection', () async {
+    final bridge = _DeferredBridge();
+    final controller = WakeWallController(bridge: bridge);
+    addTearDown(controller.dispose);
+    await controller.initialize();
+    bridge.pendingState = Completer();
+    final refresh = controller.refreshState();
+    await controller.select(2);
+    bridge.pendingState!.complete({'index': 0, 'wakeWallActive': true});
+    await refresh;
+    expect(controller.selectedIndex, 2);
+    expect(controller.wakeWallActive, isTrue);
+  });
+
+  test('shuffle next never flashes a guessed sequential wallpaper', () async {
+    final bridge = _DeferredBridge(shuffle: true);
+    final controller = WakeWallController(bridge: bridge);
+    addTearDown(controller.dispose);
+    await controller.initialize();
+    final selections = <int>[];
+    controller.selectedIndexListenable.addListener(() {
+      selections.add(controller.selectedIndex);
+    });
+    final next = controller.next();
+    expect(controller.selectedIndex, 0);
+    bridge.pendingNext.complete(3);
+    await next;
+    expect(selections, [3]);
+  });
+
+  test('sequential next still acknowledges selection immediately', () async {
+    final bridge = _DeferredBridge();
+    final controller = WakeWallController(bridge: bridge);
+    addTearDown(controller.dispose);
+    await controller.initialize();
+    final next = controller.next();
+    expect(controller.selectedIndex, 1);
+    bridge.pendingNext.complete(1);
+    await next;
+  });
+
+  test('initialization can finish safely after controller disposal', () async {
+    final bridge = _DeferredBridge()..pendingState = Completer();
+    final controller = WakeWallController(bridge: bridge);
+    final initialization = controller.initialize();
+    controller.dispose();
+    bridge.pendingState!.complete({'index': 2});
+    await initialization;
+    expect(bridge.configurationCalls, 0);
+  });
+
+  test('selection completion after disposal cannot notify a dead notifier', () async {
+    final bridge = _DeferredBridge()..pendingSelection = Completer();
+    final controller = WakeWallController(bridge: bridge);
+    await controller.initialize();
+    final selection = controller.select(1);
+    controller.dispose();
+    bridge.pendingSelection!.complete(2);
+    await selection;
+    expect(controller.lastNativeError, isNull);
+  });
+
   test(
     'controller restores and updates the native current wallpaper',
     () async {
@@ -403,6 +465,35 @@ class _FakeNativeWallpaperBridge extends NativeWallpaperBridge {
     'displayMode': displayMode,
     'fitBackgroundColor': fitBackgroundColor,
   };
+}
+
+class _DeferredBridge extends _FakeNativeWallpaperBridge {
+  _DeferredBridge({this.shuffle = false}) : super(currentIndex: 0);
+
+  final bool shuffle;
+  Completer<Map<String, Object?>>? pendingState;
+  Completer<int?>? pendingSelection;
+  final Completer<int?> pendingNext = Completer();
+  int configurationCalls = 0;
+
+  @override
+  Future<Map<String, Object?>> state() => pendingState?.future ?? super.state();
+
+  @override
+  Future<Map<String, Object?>> configuration() async {
+    configurationCalls++;
+    return {...await super.configuration(), 'shuffle': shuffle};
+  }
+
+  @override
+  Future<int?> setCurrent(int index) =>
+      pendingSelection?.future ?? super.setCurrent(index);
+
+  @override
+  Future<int?> showNext() => pendingNext.future;
+
+  @override
+  Future<Uint8List?> mainPreview(String value) async => null;
 }
 
 class _IncrementalImportBridge extends _FakeNativeWallpaperBridge {

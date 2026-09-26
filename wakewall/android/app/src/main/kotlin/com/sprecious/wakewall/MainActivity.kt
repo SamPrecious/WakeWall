@@ -454,7 +454,7 @@ class MainActivity : FlutterFragmentActivity() {
         previewExecutor.schedule(
             {
                 try {
-                    WakeWallStore(context).prepareMainPreviews()
+                    runCatching { WakeWallStore(context).prepareMainPreviews() }
                 } finally {
                     previewWarmupScheduled.set(false)
                 }
@@ -509,7 +509,7 @@ class MainActivity : FlutterFragmentActivity() {
         private val previewWarmupScheduled = AtomicBoolean(false)
         private val previewExecutor = Executors.newSingleThreadScheduledExecutor { task ->
             Thread({
-                Process.setThreadPriority(Process.THREAD_PRIORITY_BACKGROUND)
+                runCatching { Process.setThreadPriority(Process.THREAD_PRIORITY_BACKGROUND) }
                 task.run()
             }, "WakeWallPreviewWarmup")
         }

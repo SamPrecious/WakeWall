@@ -59,6 +59,21 @@ android {
         // Flutter still provides a v21 launch drawable even though WakeWall's minimum SDK is newer.
         disable += "ObsoleteSdkInt"
     }
+
+    testOptions {
+        unitTests.isIncludeAndroidResources = true
+    }
+}
+
+dependencies {
+    testImplementation("junit:junit:4.13.2")
+    testImplementation("org.robolectric:robolectric:4.16")
+    testImplementation("org.mockito:mockito-core:5.23.0")
+}
+
+// Flutter's copied assets are also inputs to AGP's resource-backed unit tests.
+tasks.matching { it.name == "packageDebugUnitTestForUnitTest" }.configureEach {
+    dependsOn("copyFlutterAssetsDebug")
 }
 
 kotlin {

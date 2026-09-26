@@ -34,6 +34,7 @@ class _WakeWallAppState extends State<WakeWallApp> with WidgetsBindingObserver {
   @override
   void dispose() {
     WidgetsBinding.instance.removeObserver(this);
+    router.dispose();
     if (ownsController) controller.dispose();
     super.dispose();
   }

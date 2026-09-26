@@ -521,6 +521,52 @@ void main() {
     await tester.pumpAndSettle();
   });
 
+  for (final shuffle in [false, true]) {
+    testWidgets(
+      'Next updates the preview after a fast strip scroll (shuffle: $shuffle)',
+      (tester) async {
+        tester.view.devicePixelRatio = 1;
+        tester.view.physicalSize = const Size(400, 900);
+        addTearDown(tester.view.resetDevicePixelRatio);
+        addTearDown(tester.view.resetPhysicalSize);
+        final bridge = _ScrollablePreviewBridge(shuffle: shuffle);
+        final controller = WakeWallController(bridge: bridge);
+        await tester.pumpWidget(WakeWallApp(controller: controller));
+        await tester.pumpAndSettle();
+
+        final firstTile = find.byKey(
+          const ValueKey('wallpaper-thumbnail-local:scroll-0.jpg'),
+        );
+        final gesture = await tester.startGesture(tester.getCenter(firstTile));
+        // Recognise the drag before the tap recognizer's 100 ms press deadline.
+        await gesture.moveBy(const Offset(-30, 0));
+        await gesture.moveBy(const Offset(-450, 0));
+        await gesture.up();
+        await tester.pumpAndSettle();
+        final scrollable = tester.state<ScrollableState>(
+          find.descendant(
+            of: find.byKey(const ValueKey('wallpaper-strip-scroll')),
+            matching: find.byType(Scrollable),
+          ),
+        );
+        expect(scrollable.position.pixels, greaterThan(300));
+        expect(controller.selectedIndex, 0);
+
+        await tester.tap(find.byTooltip('Next Wallpaper'));
+        await tester.pumpAndSettle();
+        expect(bridge.nextRequests, 1);
+        expect(controller.selectedIndex, shuffle ? 7 : 1);
+        final preview = tester.widget<AbstractWallpaper>(
+          find.descendant(
+            of: find.byKey(const ValueKey('wakewall-main-preview')),
+            matching: find.byType(AbstractWallpaper),
+          ),
+        );
+        expect(preview.wallpaper.id, controller.selectedWallpaper!.id);
+      },
+    );
+  }
+
   testWidgets('thumbnail press updates the large preview before selection', (
     tester,
   ) async {
@@ -727,6 +773,50 @@ void main() {
     expect(tester.widget<Image>(find.byType(Image)).fit, BoxFit.cover);
   });
 
+  testWidgets(
+    'selected preview loads when startup returns only its thumbnail',
+    (tester) async {
+      final bridge = _ImagePreviewBridge()..currentIndex = 1;
+      final controller = WakeWallController(bridge: bridge);
+      await tester.pumpWidget(WakeWallApp(controller: controller));
+      await tester.pump();
+      await tester.pump(const Duration(seconds: 1));
+      expect(
+        find.byKey(const ValueKey('main-preview-loading')),
+        findsOneWidget,
+      );
+      expect(bridge.mainPreviewRequests, 1);
+      bridge.completeMainPreview();
+      await tester.pumpAndSettle();
+      expect(find.byKey(const ValueKey('main-preview-loading')), findsNothing);
+      expect(
+        controller.selectedWallpaper!.mainPreview,
+        same(bridge.secondMainPreview),
+      );
+    },
+  );
+
+  testWidgets(
+    'resume requests the missing preview of the newly active wallpaper',
+    (tester) async {
+      final bridge = _ImagePreviewBridge();
+      final controller = WakeWallController(bridge: bridge);
+      await tester.pumpWidget(WakeWallApp(controller: controller));
+      await tester.pumpAndSettle();
+      bridge.currentIndex = 1;
+      await controller.refreshState();
+      await tester.pump();
+      expect(bridge.mainPreviewRequests, 1);
+      bridge.completeMainPreview();
+      await tester.pumpAndSettle();
+      expect(find.byKey(const ValueKey('main-preview-loading')), findsNothing);
+      expect(
+        controller.selectedWallpaper!.mainPreview,
+        same(bridge.secondMainPreview),
+      );
+    },
+  );
+
   testWidgets('missing main preview loads without enlarging its thumbnail', (
     tester,
   ) async {
@@ -770,6 +860,67 @@ void main() {
     await tester.pump();
     expect(bridge.mainPreviewRequests, 1);
   });
+
+  for (final failure in ['null', 'empty', 'error']) {
+    testWidgets(
+      'a $failure preview response stops loading and can be retried',
+      (tester) async {
+        final bridge = _ImagePreviewBridge()..currentIndex = 1;
+        final controller = WakeWallController(bridge: bridge);
+        await tester.pumpWidget(WakeWallApp(controller: controller));
+        await tester.pump();
+        await tester.pump(const Duration(seconds: 1));
+        expect(bridge.mainPreviewRequests, 1);
+        if (failure == 'error') {
+          bridge.mainPreviewResult.completeError(
+            PlatformException(code: 'native_error'),
+          );
+        } else {
+          bridge.mainPreviewResult.complete(
+            failure == 'empty' ? Uint8List(0) : null,
+          );
+        }
+        await tester.pumpAndSettle();
+        expect(
+          find.byKey(const ValueKey('main-preview-loading')),
+          findsNothing,
+        );
+        expect(
+          find.byKey(const ValueKey('main-preview-unavailable')),
+          findsOneWidget,
+        );
+        await controller.refreshState();
+        await tester.pumpAndSettle();
+        expect(
+          bridge.mainPreviewRequests,
+          1,
+        ); // No repeating requests after a failure.
+
+        bridge.mainPreviewResult = Completer();
+        await tester.tap(find.text('Retry'));
+        await tester.pump();
+        expect(
+          find.byKey(const ValueKey('main-preview-loading')),
+          findsOneWidget,
+        );
+        expect(bridge.mainPreviewRequests, 2);
+        bridge.completeMainPreview();
+        await tester.pumpAndSettle();
+        expect(
+          find.byKey(const ValueKey('main-preview-loading')),
+          findsNothing,
+        );
+        expect(
+          find.byKey(const ValueKey('main-preview-unavailable')),
+          findsNothing,
+        );
+        expect(
+          controller.selectedWallpaper!.mainPreview,
+          same(bridge.secondMainPreview),
+        );
+      },
+    );
+  }
 
   testWidgets('damaged preview bytes show a clear fallback', (tester) async {
     final wallpaper = Wallpaper(
@@ -1157,13 +1308,14 @@ class _ImagePreviewBridge extends _EmptyBridge {
   final Uint8List firstMainPreview = Uint8List.fromList(pixel);
   final Uint8List secondThumbnail = Uint8List.fromList(pixel);
   final Uint8List secondMainPreview = Uint8List.fromList(pixel);
-  final Completer<Uint8List?> mainPreviewResult = Completer();
+  Completer<Uint8List?> mainPreviewResult = Completer();
   int mainPreviewRequests = 0;
+  int currentIndex = 0;
   late final List<Map<String, Object?>> wallpapers;
 
   @override
   Future<Map<String, Object?>> state() async => {
-    'index': 0,
+    'index': currentIndex,
     'wallpaperCount': wallpapers.length,
     'paused': false,
     'shuffle': false,
@@ -1189,6 +1341,40 @@ class _ImagePreviewBridge extends _EmptyBridge {
     if (!mainPreviewResult.isCompleted) {
       mainPreviewResult.complete(secondMainPreview);
     }
+  }
+}
+
+class _ScrollablePreviewBridge extends _ImagePreviewBridge {
+  _ScrollablePreviewBridge({required this.shuffle}) {
+    final original = {...wallpapers.first};
+    wallpapers
+      ..clear()
+      ..addAll(
+        List.generate(
+          30,
+          (index) => {
+            ...original,
+            'uri': 'local:scroll-$index.jpg',
+            'name': 'Photo $index',
+          },
+        ),
+      );
+  }
+
+  final bool shuffle;
+  int nextRequests = 0;
+
+  @override
+  Future<Map<String, Object?>> state() async => {
+    ...await super.state(),
+    'shuffle': shuffle,
+  };
+
+  @override
+  Future<int?> showNext() async {
+    nextRequests++;
+    currentIndex = (currentIndex + (shuffle ? 7 : 1)) % wallpapers.length;
+    return currentIndex;
   }
 }
 

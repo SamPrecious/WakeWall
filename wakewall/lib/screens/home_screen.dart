@@ -70,6 +70,7 @@ class _HomeScreenState extends State<HomeScreen> {
   final ValueNotifier<int?> optimisticPreviewIndex = ValueNotifier(null);
   Timer? previewWarmupTimer;
   int previewWarmupSerial = 0;
+  bool previewWarmupRunning = false;
 
   WakeWallController get controller => widget.controller;
 
@@ -94,8 +95,12 @@ class _HomeScreenState extends State<HomeScreen> {
   void _schedulePreviewWarmup() {
     previewWarmupTimer?.cancel();
     final serial = ++previewWarmupSerial;
-    previewWarmupTimer = Timer(previewWarmupDelay, () {
-      WidgetsBinding.instance.addPostFrameCallback((_) async {
+    previewWarmupTimer = Timer(previewWarmupDelay, () async {
+      if (previewWarmupRunning) return;
+      previewWarmupRunning = true;
+      try {
+        // endOfFrame schedules a frame even when the UI has settled and is idle.
+        await WidgetsBinding.instance.endOfFrame;
         if (!mounted || serial != previewWarmupSerial) return;
         final wallpapers = controller.wallpapers;
         if (wallpapers.length < 2) return;
@@ -117,7 +122,10 @@ class _HomeScreenState extends State<HomeScreen> {
             // A damaged cache can still use the normal image error path.
           }
         }
-      });
+      } finally {
+        previewWarmupRunning = false;
+        if (mounted && serial != previewWarmupSerial) _schedulePreviewWarmup();
+      }
     });
   }
 
@@ -844,7 +852,18 @@ class _Preview extends StatelessWidget {
                               children: [
                                 if (previewBytes == null &&
                                     wallpaper.isUserImage)
-                                  const _MainPreviewLoading()
+                                  _MainPreviewPlaceholder(
+                                    onRetry:
+                                        controller.mainPreviewFailed(
+                                          wallpaper.id,
+                                        )
+                                        ? () => unawaited(
+                                            controller.ensureMainPreview(
+                                              boundedIndex,
+                                            ),
+                                          )
+                                        : null,
+                                  )
                                 else
                                   AbstractWallpaper(
                                     wallpaper: wallpaper,
@@ -1083,36 +1102,51 @@ class _InitialLoadingPreviewState extends State<_InitialLoadingPreview> {
 }
 
 // Keeps tiny strip thumbnails out of the large card while its real preview is built.
-class _MainPreviewLoading extends StatelessWidget {
-  const _MainPreviewLoading();
+class _MainPreviewPlaceholder extends StatelessWidget {
+  const _MainPreviewPlaceholder({this.onRetry});
+
+  final VoidCallback? onRetry;
 
   @override
   Widget build(BuildContext context) {
     final colors = context.wakeWallColors;
     return Semantics(
-      label: 'Preparing wallpaper preview',
+      label: onRetry == null
+          ? 'Preparing wallpaper preview'
+          : 'Wallpaper preview unavailable',
       child: ColoredBox(
-        key: const ValueKey('main-preview-loading'),
+        key: ValueKey(
+          onRetry == null ? 'main-preview-loading' : 'main-preview-unavailable',
+        ),
         color: colors.surface,
         child: Center(
           child: Column(
             mainAxisSize: MainAxisSize.min,
             children: [
-              SizedBox(
-                width: 26,
-                height: 26,
-                child: CircularProgressIndicator(
-                  strokeWidth: 2.2,
-                  color: colors.tealStrong,
+              if (onRetry != null)
+                Icon(Icons.broken_image_outlined, size: 28, color: colors.muted)
+              else
+                SizedBox(
+                  width: 26,
+                  height: 26,
+                  child: CircularProgressIndicator(
+                    strokeWidth: 2.2,
+                    color: colors.tealStrong,
+                  ),
                 ),
-              ),
               const SizedBox(height: 12),
               Text(
-                'Preparing Wallpaper',
+                onRetry == null ? 'Preparing Wallpaper' : 'Preview Unavailable',
                 style: Theme.of(
                   context,
                 ).textTheme.bodyMedium?.copyWith(color: colors.muted),
               ),
+              if (onRetry != null)
+                TextButton(
+                  onPressed: onRetry,
+                  style: TextButton.styleFrom(minimumSize: const Size(64, 48)),
+                  child: const Text('Retry'),
+                ),
             ],
           ),
         ),
@@ -1534,6 +1568,9 @@ class _WallpaperStripState extends State<_WallpaperStrip> {
                                       onPointerDown: (_) {
                                         previewSelection(index);
                                       },
+                                      // Fast scrolls can reject a tap before onTapCancel is sent.
+                                      onPointerUp: (_) =>
+                                          cancelPreviewSelection(),
                                       onPointerCancel: (_) =>
                                           cancelPreviewSelection(),
                                       child: GestureDetector(

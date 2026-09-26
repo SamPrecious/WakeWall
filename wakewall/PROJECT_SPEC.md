@@ -127,6 +127,8 @@ Important invariants:
   priority rather than competing with Flutter's tap response.
 - Superseded engine preparation may finish, but it must not queue one expensive
   render per rapid tap; resume once with the latest requested wallpaper.
+- Picker-preview engines display the current wallpaper but do not advance the
+  shared rotation or retain a prepared next frame.
 
 ### Rotation Modes
 
@@ -238,6 +240,8 @@ replace stale derivatives.
 
 Derived caches are published only after the complete file is written. Empty or
 interrupted cache files are invalid and must be regenerated.
+Concurrent Android engines resolve each derived file to the same generation lock
+so a missing high-resolution render is never decoded and built several times at once.
 
 After Android cache is cleared, startup rebuilds the small `Up Next` thumbnails
 and only the selected wallpaper's missing 1080-pixel main preview before showing
@@ -247,6 +251,10 @@ on demand when selected. Full-aspect crop-editor sources are generated only when
 the editor opens, while native live-wallpaper renders remain owned by the
 engine's current/next frame preparation.
 
+The selected wallpaper requests its missing main preview after startup, resume,
+and album changes as well as direct taps. A failed preview request ends with a
+retry action instead of leaving a permanent preparing indicator.
+
 ### Runtime Frames
 
 The live wallpaper engine keeps current and next rendered frames in memory so
@@ -255,6 +263,8 @@ When a finished render already matches the wallpaper surface, it is decoded
 directly into the retained mutable frame rather than copied through a second
 full-screen bitmap.
 Temporary bitmaps must be recycled when replaced or when an engine is destroyed.
+An engine also releases its retained frames as soon as its surface is destroyed,
+and missing current frames are prepared off Android's wallpaper callback thread.
 
 ### Cleanup
 
@@ -349,6 +359,8 @@ placed directly beside the feature it controls.
   thumbnail or add a local fade as a substitute for responsive switching.
 - A native response from an older rapid tap must never overwrite a newer local
   selection.
+- A thumbnail's temporary press preview ends when the pointer lifts or is
+  cancelled, including fast swipes that become scrolling instead of a tap.
 - Full-preview warmup uses one debounced worker for the nearby queue window and
   abandons stale neighbour work so rapid taps cannot build competing main-preview
   decode queues.
@@ -472,6 +484,7 @@ Run native checks when Kotlin or Android behavior changes:
 cd android
 .\gradlew.bat :app:compileDebugKotlin
 .\gradlew.bat :app:lintDebug
+.\gradlew.bat :app:testDebugUnitTest
 ```
 
 After completed development work, start a release APK build from the Flutter
@@ -481,8 +494,8 @@ project root:
 flutter build apk --release
 ```
 
-The release build is currently signed with the debug key for personal testing.
-A permanent release signing configuration is required before distribution.
+Release signing is configured by the project Gradle setup. Do not alter its
+keystore, package ID, version, or Play configuration during normal development.
 
 ## High-Risk Regression Checklist
 

@@ -137,13 +137,13 @@ extension WakeWallPaletteStyle on WakeWallPalette {
 }
 
 abstract final class WakeWallTheme {
-  static ThemeData get dark =>
+  static final ThemeData dark =
       _build(brightness: Brightness.dark, colors: WakeWallColors.dark);
 
-  static ThemeData get light =>
+  static final ThemeData light =
       _build(brightness: Brightness.light, colors: WakeWallColors.light);
 
-  static ThemeData get midnight =>
+  static final ThemeData midnight =
       _build(brightness: Brightness.dark, colors: WakeWallColors.midnight);
 
   static ThemeData _build({

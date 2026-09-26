@@ -29,7 +29,7 @@ class WakeWallBootFrameStore(context: Context) {
 
     fun saveFrom(source: File?): Boolean = synchronized(LOCK) {
         if (source?.isFile != true || source.length() <= 0) {
-            clear()
+            // A transient render failure must not erase the last usable boot frame.
             return@synchronized false
         }
         val sourcePath = source.absolutePath

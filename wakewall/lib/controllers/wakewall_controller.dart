@@ -19,6 +19,7 @@ class WakeWallController extends ChangeNotifier {
   final List<WallpaperAlbum> _albums = [];
   final ValueNotifier<int> _selectedIndexNotifier = ValueNotifier<int>(0);
   final Map<String, Future<void>> _mainPreviewLoads = {};
+  final Set<String> _failedMainPreviews = {};
   final Map<String, Future<void>> _editorPreviewLoads = {};
   Set<String> _activeAlbumIds = {};
   bool _askAlbumsAfterImport = true;
@@ -62,6 +63,8 @@ class WakeWallController extends ChangeNotifier {
   PhotoSource get photoSource => _photoSource;
   Uint8List? get selectedPreview => selectedWallpaper?.preview;
   String? get lastNativeError => _lastNativeError;
+  bool mainPreviewFailed(String wallpaperId) =>
+      _failedMainPreviews.contains(wallpaperId);
 
   Wallpaper? get selectedWallpaper =>
       hasWallpapers ? _wallpapers[_selectedIndex] : null;
@@ -74,6 +77,7 @@ class WakeWallController extends ChangeNotifier {
   }
 
   Future<void> _initialize() async {
+    if (_disposed) return;
     _initialConfigurationLoaded = false;
     _lastNativeError = null;
     notifyListeners();
@@ -81,7 +85,9 @@ class WakeWallController extends ChangeNotifier {
       // The small state response reveals whether a library exists before Android
       // verifies or rebuilds every image preview in the full configuration.
       try {
-        _applyConfiguration(await _bridge.state());
+        final state = await _bridge.state();
+        if (_disposed) return;
+        _applyConfiguration(state);
         notifyListeners();
       } catch (_) {
         // A failed optional fast path must not prevent the complete configuration.
@@ -99,8 +105,14 @@ class WakeWallController extends ChangeNotifier {
 
   // Refreshes changing settings without reloading every image preview.
   Future<void> refreshState() async {
+    final serial = _selectionSerial;
     try {
-      _applyConfiguration(await _bridge.state());
+      final state = await _bridge.state();
+      // A resume response may describe the wallpaper from before the latest tap.
+      _applyConfiguration({
+        ...state,
+        if (serial != _selectionSerial) 'index': _selectedIndex,
+      });
       notifyListeners();
     } on MissingPluginException {
       // Non-Android previews use the in-memory defaults.
@@ -128,31 +140,41 @@ class WakeWallController extends ChangeNotifier {
 
   // Fetches a missing large preview once without blocking wallpaper selection.
   Future<void> ensureMainPreview(int index) {
-    if (index < 0 || index >= _wallpapers.length) return Future.value();
+    if (_disposed || index < 0 || index >= _wallpapers.length) {
+      return Future.value();
+    }
     final wallpaper = _wallpapers[index];
     if (!wallpaper.isUserImage || wallpaper.mainPreview != null) {
       return Future.value();
     }
-    return _mainPreviewLoads.putIfAbsent(
+    final load = _mainPreviewLoads.putIfAbsent(
       wallpaper.id,
       () => _loadMainPreview(wallpaper.id),
     );
+    if (_failedMainPreviews.remove(wallpaper.id)) notifyListeners();
+    return load;
   }
 
   Future<void> _loadMainPreview(String wallpaperId) async {
     try {
-      final bytes = await _bridge.mainPreview(wallpaperId);
-      if (bytes == null || bytes.isEmpty || _disposed) return;
+      Uint8List? bytes;
+      try {
+        bytes = await Future<Uint8List?>.sync(
+          () => _bridge.mainPreview(wallpaperId),
+        );
+      } catch (_) {
+        // A failed native request is a completed failure, not an ongoing load.
+      }
+      if (_disposed) return;
       final index = _wallpapers.indexWhere((item) => item.id == wallpaperId);
       if (index < 0 || _wallpapers[index].mainPreview != null) return;
-      _wallpapers[index] = _wallpapers[index].copyWith(mainPreview: bytes);
+      if (bytes == null || bytes.isEmpty) {
+        _failedMainPreviews.add(wallpaperId);
+      } else {
+        _failedMainPreviews.remove(wallpaperId);
+        _wallpapers[index] = _wallpapers[index].copyWith(mainPreview: bytes);
+      }
       notifyListeners();
-    } on MissingPluginException {
-      // Sample/non-Android builds do not have native preview generation.
-    } on PlatformException {
-      // The preview can remain unavailable without breaking selection.
-    } catch (_) {
-      // Damaged sources use the normal unavailable-preview state.
     } finally {
       _mainPreviewLoads.remove(wallpaperId);
     }
@@ -216,6 +238,7 @@ class WakeWallController extends ChangeNotifier {
         ),
       );
       if (updated != null) {
+        _failedMainPreviews.remove(updated.id);
         _wallpapers[index] = updated;
         saved = true;
         notifyListeners();
@@ -229,12 +252,19 @@ class WakeWallController extends ChangeNotifier {
   Future<void> next() async {
     if (_wallpapers.isEmpty) return;
     final serial = ++_selectionSerial;
-    // Manual next feels instant while Android updates the live wallpaper.
-    _setSelectedIndex((_selectedIndex + 1) % _wallpapers.length);
+    // Sequential next is predictable; shuffle must wait for Android's actual choice.
+    if (_order == RotationOrder.sequential) {
+      _setSelectedIndex((_selectedIndex + 1) % _wallpapers.length);
+      unawaited(ensureMainPreview(_selectedIndex));
+    }
     await _runNative(() async {
       final next = await _bridge.showNext();
-      if (serial == _selectionSerial && next != null) {
+      if (!_disposed &&
+          serial == _selectionSerial &&
+          next != null &&
+          hasWallpapers) {
         _setSelectedIndex(next % _wallpapers.length);
+        unawaited(ensureMainPreview(_selectedIndex));
       }
     });
   }
@@ -526,6 +556,7 @@ class WakeWallController extends ChangeNotifier {
 
   // Rebuilds the Flutter list from Android's saved wallpaper collection.
   void _applyConfiguration(Map<String, Object?> configuration) {
+    if (_disposed) return;
     final savedWallpaperCount = (configuration['wallpaperCount'] as num?)
         ?.toInt();
     if (savedWallpaperCount != null) {
@@ -585,6 +616,11 @@ class WakeWallController extends ChangeNotifier {
       _wallpapers
         ..clear()
         ..addAll(restored);
+      final missingPreviewIds = restored
+          .where((wallpaper) => wallpaper.mainPreview == null)
+          .map((wallpaper) => wallpaper.id)
+          .toSet();
+      _failedMainPreviews.retainAll(missingPreviewIds);
       _knownWallpaperCount = _wallpapers.length;
     }
     final savedAlbums = configuration['albums'] as List<Object?>?;
@@ -623,10 +659,15 @@ class WakeWallController extends ChangeNotifier {
   }
 
   void _setSelectedIndex(int index) {
+    if (_disposed) return;
     final normalized = _wallpapers.isEmpty ? 0 : index % _wallpapers.length;
     _selectedIndex = normalized;
     if (_selectedIndexNotifier.value != normalized) {
       _selectedIndexNotifier.value = normalized;
+    }
+    // Startup, resume, and album changes can select a photo without a thumbnail tap.
+    if (!mainPreviewFailed(selectedWallpaper?.id ?? '')) {
+      unawaited(ensureMainPreview(normalized));
     }
   }
 
@@ -701,6 +742,7 @@ class WakeWallController extends ChangeNotifier {
 
   // Keeps Android-only errors from breaking previews on other platforms.
   Future<void> _runNative(Future<void> Function() action) async {
+    if (_disposed) return;
     try {
       _lastNativeError = null;
       await action();
@@ -714,6 +756,12 @@ class WakeWallController extends ChangeNotifier {
       _lastNativeError = 'WakeWall could not complete that action.';
       notifyListeners();
     }
+  }
+
+  // Native operations cannot be cancelled, but late completions must not notify dead widgets.
+  @override
+  void notifyListeners() {
+    if (!_disposed) super.notifyListeners();
   }
 
   @override
